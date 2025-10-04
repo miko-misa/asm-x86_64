@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "asm: build (-g -Og)",
+      "type": "shell",
+      "command": "gcc",
+      "args": ["-g","-Og","${file}","-o","${fileDirname}/${fileBasenameNoExtension}.o"],
+      "problemMatcher": "$gcc",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "hide": true
+    },
+    {
+      "label": "asm: gdb (tui)",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-lc","gdb -q -tui ${fileDirname}/${fileBasenameNoExtension}.o"],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "hide": true
+    },
+    {
+      "label": "Run: assemble + gdb",
+      "dependsOn": ["asm: build (-g -Og)", "asm: gdb (tui)"],
+      "dependsOrder": "sequence",
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}

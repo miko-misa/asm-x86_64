@@ -1,0 +1,6 @@
+*.o
+*.out
+
+# Binaries generated from assembly sources (no extension)
+sample/*
+!sample/*.s
