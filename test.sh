@@ -1,9 +1,28 @@
-#!/bin/zsh
+#!/usr/bin/env sh
+
+if [ -z "${TEST_SH_PREFERRED_SHELL:-}" ]; then
+    if command -v zsh >/dev/null 2>&1; then
+        export TEST_SH_PREFERRED_SHELL=zsh
+        exec zsh "$0" "$@"
+    elif command -v bash >/dev/null 2>&1; then
+        export TEST_SH_PREFERRED_SHELL=bash
+        exec bash "$0" "$@"
+    else
+        echo "Error: this script requires either zsh or bash" >&2
+        exit 1
+    fi
+fi
+
+if [ -n "${ZSH_VERSION:-}" ]; then
+    setopt KSH_ARRAYS
+    setopt SH_WORD_SPLIT
+fi
+
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-	echo "Usage: $0 <parser.c> <testcases.txt> [--makefile <path>]" >&2
-	exit 1
+    echo "Usage: $0 <parser.c> <testcases.txt> [--makefile <path>]" >&2
+    exit 1
 fi
 
 cli_makefile=""
@@ -35,12 +54,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if (( ${#args[@]} != 2 )); then
-	echo "Usage: $0 <parser.c> <testcases.txt> [--makefile <path>]" >&2
-	exit 1
+    echo "Usage: $0 <parser.c> <testcases.txt> [--makefile <path>]" >&2
+    exit 1
 fi
 
-parser_src=${args[1]}
-testcases_file=${args[2]}
+parser_src=${args[0]}
+testcases_file=${args[1]}
 
 if [[ ! -f $parser_src ]]; then
 	echo "Parser source not found: $parser_src" >&2

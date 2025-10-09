@@ -1,7 +1,7 @@
 CC ?= clang
 CPPFLAGS ?= -DTARGET_SYSTEM_LINUX
 CFLAGS ?= -Wall -Wextra -std=c11 -m64
-ASFLAGS ?= -g -Og -m64
+ASFLAGS ?= -g -Og -m64 -Wa,--noexecstack
 
 .PHONY: parser program clean
 

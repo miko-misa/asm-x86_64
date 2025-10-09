@@ -1,9 +1,28 @@
-#!/bin/zsh
+#!/usr/bin/env sh
+
+if [ -z "${RUN_SH_PREFERRED_SHELL:-}" ]; then
+    if command -v zsh >/dev/null 2>&1; then
+        export RUN_SH_PREFERRED_SHELL=zsh
+        exec zsh "$0" "$@"
+    elif command -v bash >/dev/null 2>&1; then
+        export RUN_SH_PREFERRED_SHELL=bash
+        exec bash "$0" "$@"
+    else
+        echo "Error: this script requires either zsh or bash" >&2
+        exit 1
+    fi
+fi
+
+if [ -n "${ZSH_VERSION:-}" ]; then
+    setopt KSH_ARRAYS
+    setopt SH_WORD_SPLIT
+fi
+
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-	echo "Usage: $0 <parser.c> [expression] [--makefile <path>]" >&2
-	exit 1
+    echo "Usage: $0 <parser.c> [expression] [--makefile <path>]" >&2
+    exit 1
 fi
 
 cli_makefile=""
@@ -35,13 +54,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if (( ${#args[@]} < 1 )); then
-	echo "Usage: $0 <parser.c> [expression] [--makefile <path>]" >&2
-	exit 1
+    echo "Usage: $0 <parser.c> [expression] [--makefile <path>]" >&2
+    exit 1
 fi
 
-src=${args[1]}
+src=${args[0]}
 if (( ${#args[@]} >= 2 )); then
-	expr=${args[2]}
+    expr=${args[1]}
 else
 	expr="3+4="
 fi
