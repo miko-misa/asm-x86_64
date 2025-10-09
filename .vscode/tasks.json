@@ -5,7 +5,19 @@
       "label": "asm: build (-g -Og)",
       "type": "shell",
       "command": "gcc",
-      "args": ["-g","-Og","${file}","-o","${fileDirname}/${fileBasenameNoExtension}.o"],
+      "args": [
+        "-g",
+        "-Og",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}.o"
+      ],
+      "options": {
+        "shell": {
+          "executable": "/usr/bin/arch",
+          "args": ["-x86_64", "/bin/zsh", "-c"]
+        }
+      },
       "problemMatcher": "$gcc",
       "presentation": { "reveal": "always", "panel": "dedicated" },
       "hide": true
@@ -13,8 +25,17 @@
     {
       "label": "asm: gdb (tui)",
       "type": "shell",
-      "command": "bash",
-      "args": ["-lc","gdb -q -tui ${fileDirname}/${fileBasenameNoExtension}.o"],
+      "command": "zsh",
+      "args": [
+        "-lc",
+        "gdb -q -tui ${fileDirname}/${fileBasenameNoExtension}.o"
+      ],
+      "options": {
+        "shell": {
+          "executable": "/usr/bin/arch",
+          "args": ["-x86_64", "/bin/zsh", "-c"]
+        }
+      },
       "presentation": { "reveal": "always", "panel": "dedicated" },
       "hide": true
     },
