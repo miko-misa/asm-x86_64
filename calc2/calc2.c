@@ -4,14 +4,17 @@
 #if defined(TARGET_SYSTEM_LINUX)
 #define ASM_GLOBAL_MAIN "main"
 #define ASM_EXTERN_PRINTF "printf"
+#define ASM_EXTERN_EXIT "exit"
 #define ASM_CSTRING_SECTION ".section .rodata"
 #elif defined(TARGET_SYSTEM_MAC) || defined(__APPLE__)
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
+#define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
 #else
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
+#define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
 #endif
 #define ASM_TEXT_SECTION ".text"
@@ -125,6 +128,7 @@ int main(int argc, char* argv[]) {
       printf("movl (%%rsp), %%eax\n");
       // 加算してメモリに戻す
       printf("addl %%edx, %%eax\n");
+      printf("jo L_overflow\n");
       printf("movl %%eax, (%%rsp)\n");
       // 計算結果はクリアする
       printf("xorl %%edx, %%edx\n");
@@ -137,6 +141,7 @@ int main(int argc, char* argv[]) {
       printf("movl (%%rsp), %%eax\n");
       // 減算してメモリに戻す
       printf("subl %%edx, %%eax\n");
+      printf("jo L_overflow\n");
       printf("movl %%eax, (%%rsp)\n");
       // 計算結果はクリアする
       printf("xorl %%edx, %%edx\n");
@@ -157,9 +162,12 @@ int main(int argc, char* argv[]) {
 void initialize() {
   printf(".att_syntax prefix\n");
   printf(".extern %s\n", ASM_EXTERN_PRINTF);
+  printf(".extern %s\n", ASM_EXTERN_EXIT);
   printf("%s\n", ASM_CSTRING_SECTION);
   printf("L_fmt:\n");
   printf(".asciz \"%%d\\n\"\n");
+  printf("L_err:\n");
+  printf(".asciz \"E\\n\"\n");
   printf("%s\n", ASM_TEXT_SECTION);
   printf(".globl %s\n", ASM_GLOBAL_MAIN);
   printf("%s:\n", ASM_GLOBAL_MAIN);
@@ -190,7 +198,9 @@ void input_number(char** p) {
   while (**p >= '0' && **p <= '9') {
     printf("movl $%d, %%edi\n", **p - '0');
     printf("imull $10, %%eax, %%eax\n");
+    printf("jo L_overflow\n");
     printf("addl %%edi, %%eax\n");
+    printf("jo L_overflow\n");
     (*p)++;
   }
 }
@@ -206,19 +216,25 @@ void apply_last_op(op last_op, int sign) {
   // 符号を反転する場合は %esi を neg する
   if (sign == -1) {
     printf("negl %%esi\n");
+    printf("jo L_overflow\n");
   }
   switch (last_op) {
     case PLUS:
       printf("addl %%esi, %%edx\n");
+      printf("jo L_overflow\n");
       break;
     case MINUS:
       printf("subl %%esi, %%edx\n");
+      printf("jo L_overflow\n");
       break;
     case MUL:
       printf("imull %%esi, %%edx\n");
+      printf("jo L_overflow\n");
       break;
     case DIV:
       printf("movl %%esi, %%ecx\n");
+      printf("testl %%ecx, %%ecx\n");
+      printf("je L_overflow\n");
       printf("movl %%edx, %%eax\n");
       printf("cltd\n");
       printf("idivl %%ecx\n");
@@ -241,6 +257,17 @@ void finalize() {
   printf("xorl %%eax, %%eax\n");
   printf("leave\n");
   printf("ret\n");
+  printf("L_overflow:\n");
+  printf("subq $8, %%rsp\n");
+  printf("leaq L_err(%%rip), %%rdi\n");
+  printf("movl $0, %%eax\n");
+  printf("callq %s\n", ASM_EXTERN_PRINTF);
+  printf("addq $8, %%rsp\n");
+  printf("addq $8, %%rsp\n");
+  printf("leave\n");
+  printf("subq $8, %%rsp\n");
+  printf("movl $1, %%edi\n");
+  printf("callq %s\n", ASM_EXTERN_EXIT);
 }
 
 /**
