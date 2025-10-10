@@ -23,11 +23,6 @@ typedef enum {
   DIV,
 } op;
 
-typedef enum {
-  S_PLUS,
-  S_MINUS,
-} sign_inversion;
-
 void initialize();
 void input_number(char** p);
 void apply_last_op(op last_op, int sign);
