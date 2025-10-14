@@ -48,6 +48,17 @@ void ignore_all_sign_inversions(char** p);
 void reset_formula(op* last_op, int* sign);
 
 /**
+ * @brief 出力アセンブリの各行をまとめて出力する。
+ * @param lines 出力する各行の配列。
+ * @param count 配列の要素数。
+ */
+static void emit_lines(const char* const* lines, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    fputs(lines[i], stdout);
+  }
+}
+
+/**
  * @brief
  * コマンドライン引数の電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成するエントリポイント。
  * @param argc 引数の数。
@@ -160,22 +171,25 @@ int main(int argc, char* argv[]) {
  * 出力アセンブリのプロローグを生成し、累積レジスタとメモリ領域を初期化する。
  */
 void initialize() {
-  printf(".att_syntax prefix\n");
-  printf(".extern %s\n", ASM_EXTERN_PRINTF);
-  printf(".extern %s\n", ASM_EXTERN_EXIT);
-  printf("%s\n", ASM_CSTRING_SECTION);
-  printf("L_fmt:\n");
-  printf(".asciz \"%%d\\n\"\n");
-  printf("L_err:\n");
-  printf(".asciz \"E\\n\"\n");
-  printf("%s\n", ASM_TEXT_SECTION);
-  printf(".globl %s\n", ASM_GLOBAL_MAIN);
-  printf("%s:\n", ASM_GLOBAL_MAIN);
-  printf("pushq %%rbp\n");
-  printf("movq %%rsp, %%rbp\n");
-  printf("xorl %%eax, %%eax\n");
-  printf("pushq $0\n");
-  printf("xorl %%edx, %%edx\n");
+  static const char* const lines[] = {
+      ".att_syntax prefix\n",
+      ".extern " ASM_EXTERN_PRINTF "\n",
+      ".extern " ASM_EXTERN_EXIT "\n",
+      ASM_CSTRING_SECTION "\n",
+      "L_fmt:\n",
+      ".asciz \"%d\\n\"\n",
+      "L_err:\n",
+      ".asciz \"E\\n\"\n",
+      ASM_TEXT_SECTION "\n",
+      ".globl " ASM_GLOBAL_MAIN "\n",
+      ASM_GLOBAL_MAIN ":\n",
+      "pushq %rbp\n",
+      "movq %rsp, %rbp\n",
+      "xorl %eax, %eax\n",
+      "pushq $0\n",
+      "xorl %edx, %edx\n",
+  };
+  emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
 
 /**
@@ -237,12 +251,10 @@ void apply_last_op(op last_op, int sign) {
       printf("movl %%eax, %%edx\n");
       break;
     case DIV:
-      printf("movl %%esi, %%ecx\n");
-      printf("testl %%ecx, %%ecx\n");
+      printf("testl %%esi, %%esi\n");
       printf("je L_overflow\n");
-      printf("movl %%edx, %%eax\n");
-      printf("cltd\n");
-      printf("idivl %%ecx\n");
+      printf("movl %%edx, %%edi\n");
+      printf("callq div32\n");
       printf("movl %%eax, %%edx\n");
       break;
   }
@@ -252,68 +264,109 @@ void apply_last_op(op last_op, int sign) {
  * @brief 計算結果の表示とスタック後始末を行うアセンブリを生成する。
  */
 void finalize() {
-  printf("subq $8, %%rsp\n");
-  printf("movl %%edx, %%esi\n");
-  printf("leaq L_fmt(%%rip), %%rdi\n");
-  printf("movl $0, %%eax\n");
-  printf("callq %s\n", ASM_EXTERN_PRINTF);
-  printf("addq $8, %%rsp\n");
-  printf("addq $8, %%rsp\n");
-  printf("xorl %%eax, %%eax\n");
-  printf("leave\n");
-  printf("ret\n");
-  printf("L_overflow:\n");
-  printf("subq $8, %%rsp\n");
-  printf("leaq L_err(%%rip), %%rdi\n");
-  printf("movl $0, %%eax\n");
-  printf("callq %s\n", ASM_EXTERN_PRINTF);
-  printf("addq $8, %%rsp\n");
-  printf("addq $8, %%rsp\n");
-  printf("leave\n");
-  printf("subq $8, %%rsp\n");
-  printf("movl $1, %%edi\n");
-  printf("callq %s\n", ASM_EXTERN_EXIT);
-  printf(".globl mul32\n");
-  printf("mul32:\n");
-  printf("pushq %%rbp\n");
-  printf("movq %%rsp, %%rbp\n");
-  printf("pushq %%rdi\n");
-  printf("pushq %%rsi\n");
-  printf("callq abs32\n");
-  printf("movq %%rax, %%r8\n");
-  printf("movq %%rsi, %%rdi\n");
-  printf("callq abs32\n");
-  printf("movq %%rax, %%r9\n");
-  printf("xorq %%rax, %%rax\n");
-  printf("movl $32, %%ecx\n");
-  printf(".L_mul32_loop:\n");
-  printf("clc\n");
-  printf("rcrl %%r9d\n");
-  printf("jnc .L_mul32_skip\n");
-  printf("addq %%r8, %%rax\n");
-  printf(".L_mul32_skip:\n");
-  printf("shlq $1, %%r8\n");
-  printf("decl %%ecx\n");
-  printf("jnz .L_mul32_loop\n");
-  printf("popq %%rsi\n");
-  printf("popq %%rdi\n");
-  printf("xorl %%edi, %%esi\n");
-  printf("testl $0x80000000, %%esi\n");
-  printf("jz .L_mul32_end\n");
-  printf("negl %%eax\n");
-  printf(".L_mul32_end:\n");
-  printf("leave\n");
-  printf("ret\n");
-  printf(".globl abs32\n");
-  printf("abs32:\n");
-  printf("pushq %%rbp\n");
-  printf("movq %%rsp, %%rbp\n");
-  printf("movl %%edi, %%eax\n");
-  printf("sarl $31, %%edi\n");
-  printf("xorl %%edi, %%eax\n");
-  printf("subl %%edi, %%eax\n");
-  printf("leave\n");
-  printf("ret\n");
+  static const char* const lines[] = {
+      "subq $8, %rsp\n",
+      "movl %edx, %esi\n",
+      "leaq L_fmt(%rip), %rdi\n",
+      "movl $0, %eax\n",
+      "callq " ASM_EXTERN_PRINTF "\n",
+      "addq $8, %rsp\n",
+      "addq $8, %rsp\n",
+      "xorl %eax, %eax\n",
+      "leave\n",
+      "ret\n",
+      "L_overflow:\n",
+      "subq $8, %rsp\n",
+      "leaq L_err(%rip), %rdi\n",
+      "movl $0, %eax\n",
+      "callq " ASM_EXTERN_PRINTF "\n",
+      "addq $8, %rsp\n",
+      "addq $8, %rsp\n",
+      "leave\n",
+      "subq $8, %rsp\n",
+      "movl $1, %edi\n",
+      "callq " ASM_EXTERN_EXIT "\n",
+      ".globl div32\n",
+      "div32:\n",
+      "pushq %rbp\n",
+      "movq %rsp, %rbp\n",
+      "pushq %rdi\n",
+      "pushq %rsi\n",
+      "callq abs32\n",
+      "movq %rax, %r8\n",
+      "movq %rsi, %rdi\n",
+      "callq abs32\n",
+      "movq %rax, %r9\n",
+      "xorq %rax, %rax\n",
+      "xorq %rdx, %rdx\n",
+      "movl $32, %ecx\n",
+      ".L_div32_loop:\n",
+      "shll $1, %eax\n",
+      "shll $1, %r8d\n",
+      "rcll %edx\n",
+      "cmpl %edx, %r9d\n",
+      "jg .L_div32_skip\n",
+      "addl $1, %eax\n",
+      "subl %r9d, %edx\n",
+      ".L_div32_skip:\n",
+      "decl %ecx\n",
+      "jnz .L_div32_loop\n",
+      "popq %rsi\n",
+      "popq %rdi\n",
+      "testl $0x80000000, %edi\n",
+      "jz .L_div32_quotient_neg\n",
+      "negl %edx\n",
+      ".L_div32_quotient_neg:\n",
+      "xorl %edi, %esi\n",
+      "testl $0x80000000, %esi\n",
+      "jz .L_div32_end\n",
+      "negl %eax\n",
+      ".L_div32_end:\n",
+      "leave\n",
+      "ret\n",
+      ".globl mul32\n",
+      "mul32:\n",
+      "pushq %rbp\n",
+      "movq %rsp, %rbp\n",
+      "pushq %rdi\n",
+      "pushq %rsi\n",
+      "callq abs32\n",
+      "movq %rax, %r8\n",
+      "movq %rsi, %rdi\n",
+      "callq abs32\n",
+      "movq %rax, %r9\n",
+      "xorq %rax, %rax\n",
+      "movl $32, %ecx\n",
+      ".L_mul32_loop:\n",
+      "clc\n",
+      "rcrl %r9d\n",
+      "jnc .L_mul32_skip\n",
+      "addq %r8, %rax\n",
+      ".L_mul32_skip:\n",
+      "shlq $1, %r8\n",
+      "decl %ecx\n",
+      "jnz .L_mul32_loop\n",
+      "popq %rsi\n",
+      "popq %rdi\n",
+      "xorl %edi, %esi\n",
+      "testl $0x80000000, %esi\n",
+      "jz .L_mul32_end\n",
+      "negl %eax\n",
+      ".L_mul32_end:\n",
+      "leave\n",
+      "ret\n",
+      ".globl abs32\n",
+      "abs32:\n",
+      "pushq %rbp\n",
+      "movq %rsp, %rbp\n",
+      "movl %edi, %eax\n",
+      "sarl $31, %edi\n",
+      "xorl %edi, %eax\n",
+      "subl %edi, %eax\n",
+      "leave\n",
+      "ret\n",
+  };
+  emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
 
 /**

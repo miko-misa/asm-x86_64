@@ -40,6 +40,17 @@ void ignore_all_sign_inversions(char** p);
 void reset_formula(op* last_op, int* sign);
 
 /**
+ * @brief 出力アセンブリの各行をまとめて出力する。
+ * @param lines 出力する各行の配列。
+ * @param count 配列の要素数。
+ */
+static void emit_lines(const char* const* lines, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    fputs(lines[i], stdout);
+  }
+}
+
+/**
  * @brief
  * コマンドライン引数の電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成するエントリポイント。
  * @param argc 引数の数。
@@ -150,19 +161,22 @@ int main(int argc, char* argv[]) {
  * 出力アセンブリのプロローグを生成し、累積レジスタとメモリ領域を初期化する。
  */
 void initialize() {
-  printf(".att_syntax prefix\n");
-  printf(".extern %s\n", ASM_EXTERN_PRINTF);
-  printf("%s\n", ASM_CSTRING_SECTION);
-  printf("L_fmt:\n");
-  printf(".asciz \"%%d\\n\"\n");
-  printf("%s\n", ASM_TEXT_SECTION);
-  printf(".globl %s\n", ASM_GLOBAL_MAIN);
-  printf("%s:\n", ASM_GLOBAL_MAIN);
-  printf("pushq %%rbp\n");
-  printf("movq %%rsp, %%rbp\n");
-  printf("xorl %%eax, %%eax\n");
-  printf("pushq $0\n");
-  printf("xorl %%edx, %%edx\n");
+  static const char* const lines[] = {
+      ".att_syntax prefix\n",
+      ".extern " ASM_EXTERN_PRINTF "\n",
+      ASM_CSTRING_SECTION "\n",
+      "L_fmt:\n",
+      ".asciz \"%d\\n\"\n",
+      ASM_TEXT_SECTION "\n",
+      ".globl " ASM_GLOBAL_MAIN "\n",
+      ASM_GLOBAL_MAIN ":\n",
+      "pushq %rbp\n",
+      "movq %rsp, %rbp\n",
+      "xorl %eax, %eax\n",
+      "pushq $0\n",
+      "xorl %edx, %edx\n",
+  };
+  emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
 
 /**
@@ -226,16 +240,19 @@ void apply_last_op(op last_op, int sign) {
  * @brief 計算結果の表示とスタック後始末を行うアセンブリを生成する。
  */
 void finalize() {
-  printf("subq $8, %%rsp\n");
-  printf("movl %%edx, %%esi\n");
-  printf("leaq L_fmt(%%rip), %%rdi\n");
-  printf("movl $0, %%eax\n");
-  printf("callq %s\n", ASM_EXTERN_PRINTF);
-  printf("addq $8, %%rsp\n");
-  printf("addq $8, %%rsp\n");
-  printf("xorl %%eax, %%eax\n");
-  printf("leave\n");
-  printf("ret\n");
+  static const char* const lines[] = {
+      "subq $8, %rsp\n",
+      "movl %edx, %esi\n",
+      "leaq L_fmt(%rip), %rdi\n",
+      "movl $0, %eax\n",
+      "callq " ASM_EXTERN_PRINTF "\n",
+      "addq $8, %rsp\n",
+      "addq $8, %rsp\n",
+      "xorl %eax, %eax\n",
+      "leave\n",
+      "ret\n",
+  };
+  emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
 
 /**
