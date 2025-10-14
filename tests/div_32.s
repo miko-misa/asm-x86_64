@@ -13,7 +13,7 @@ main:
   movq %rsp, %rbp
   movl $5, %edi
   movl $2, %esi
-  call mul32
+  call div32
   movl %eax,%esi
   xorl %eax,%eax
   leaq L_fmt(%rip), %rdi
@@ -21,37 +21,44 @@ main:
   xorl %eax, %eax
   leave
   ret
-  .globl mul32
-mul32:
-  push %rbp
+  .globl div32
+div32:
+  pushq %rbp
   movq %rsp, %rbp
-  push %rdi
-  push %rsi
+  pushq %rdi
+  pushq %rsi
   call abs32
-  movq %rax, %r8
+  movq %rax, %r8 # dividend
   movq %rsi, %rdi
   call abs32
-  movq %rax, %r9
+  movq %rax, %r9 # divisor
 
-  xorq %rax, %rax
+  xorq %rax, %rax # quotient
+  xorq %rdx, %rdx # remainder
   movl $32, %ecx
-.L_mul32_loop:
-  clc
-  rcrl %r9d
-  jnc .L_mul32_skip
-  addq %r8, %rax
-.L_mul32_skip:
-  shlq $1, %r8
+.L_div32_loop:
+  shll $1, %eax
+  shll $1, %r8d
+  rcll %edx
+  cmpl %edx, %r9d
+  jg .L_div32_skip
+  addl $1, %eax
+  subl %r9d, %edx
+.L_div32_skip:
   decl %ecx
-  jnz .L_mul32_loop
+  jnz .L_div32_loop
 
   popq %rsi
   popq %rdi
+  testl $0x80000000, %edi
+  jz .L_div32_quotient_neg
+  negl %edx
+.L_div32_quotient_neg:
   xorl %edi, %esi
   testl $0x80000000, %esi
-  jz .L_mul32_end
+  jz .L_div32_end
   negl %eax
-.L_mul32_end:
+.L_div32_end:
   leave
   ret
   .globl abs32

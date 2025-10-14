@@ -23,10 +23,10 @@ main:
   ret
   .globl mul32
 mul32:
-  push %rbp
+  pushq %rbp
   movq %rsp, %rbp
-  push %rdi
-  push %rsi
+  pushq %rdi
+  pushq %rsi
   call abs32
   movq %rax, %r8
   movq %rsi, %rdi
