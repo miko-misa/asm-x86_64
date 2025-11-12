@@ -19,6 +19,9 @@
 #endif
 #define ASM_TEXT_SECTION ".text"
 
+// 最大入れ子数
+#define MAX_EXPR_NESTING 128
+
 typedef enum {
   PLUS = '+',
   MINUS = '-',
@@ -55,6 +58,8 @@ char peek(char** p);
 void ignore_consecutive_operators(char** p);
 void ignore_all_sign_inversions(char** p);
 void reset_formula(Op* last_op, Sign* sign);
+int nesting(char** p, int nest_level);
+void finish_nesting();
 
 /**
  * @brief 出力アセンブリの各行をまとめて出力する。
@@ -70,11 +75,11 @@ static void emit_lines(const char* const* lines, size_t count) {
 /**
  * @brief
  * 電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成する。
- * @param input 入力文字列。
  * @param p 入力文字列ポインタへのポインタ。
+ * @param nest_level 現在の入れ子レベル。
  * @return 成功時0、入力が不正な場合は1などのエラーコード。
  */
-int parser(char** p) {
+int parser(char** p, int nest_level) {
   Sign sign = S_PLUS;
   Op last_op = PLUS;
   while (**p) {
@@ -104,8 +109,10 @@ int parser(char** p) {
     } else if (**p == '=') {
       // 現在の項を適用する
       apply_last_op(last_op, sign);
-      // 計算結果を出力して終了する
-      finalize();
+      // 計算結果を出力して終了する[
+      if (nest_level == 0) {
+        finalize();
+      }
       return 0;
     } else if (is_memory_clear(**p)) {
       // メモリをクリアする
@@ -148,6 +155,20 @@ int parser(char** p) {
       printf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
       (*p)++;
+    } else if (**p == '(') {
+      // 入れ子開始
+      (*p)++;
+      int result = nesting(p, nest_level);
+      if (result != 0) {
+        return result;
+      }
+    } else if (**p == ')') {
+      // 入れ子終了
+      (*p)++;
+      // 現在の項を適用する
+      apply_last_op(last_op, sign);
+      finish_nesting();
+      return 0;
     } else {
       fprintf(stderr, "Invalid character: %c\n", **p);
       return 1;
@@ -171,7 +192,7 @@ int main(int argc, char* argv[]) {
   char* input = argv[1];
   char** p = &input;
   initialize();
-  return parser(p);
+  return parser(p, 0);
 }
 
 /**
@@ -198,6 +219,29 @@ void initialize() {
       "xorl %edx, %edx\n",
   };
   emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
+}
+
+/**
+ * @brief 今から入れ子の解析を始めるための準備を行う。
+ * @param p 入力文字列ポインタへのポインタ。
+ * @param nest_level 現在の入れ子の深さ。
+ */
+int nesting(char** p, int nest_level) {
+  printf("pushq %%rdx\n");        // 現在の計算結果を保存
+  printf("pushq 8(%%rsp)\n");     // メモリ領域を重ねて保存
+  printf("xorl %%edx, %%edx\n");  // 新しい計算用にクリア
+  return parser(p, nest_level + 1);
+}
+
+/**
+ * @brief 入れ子計算の終了処理を行う。
+ */
+void finish_nesting() {
+  printf("movl (%%rsp), %%eax\n");    // 現在のメモリ領域を取得
+  printf("movl %%eax, 16(%%rsp)\n");  // メモリ領域を復元
+  printf("movl %%edx, %%eax\n");      // 括弧内の計算結果を %eax に移す
+  printf("addq $8, %%rsp\n");         // メモリ領域をポップ
+  printf("popq %%rdx\n");             // 計算結果を復元
 }
 
 /**
