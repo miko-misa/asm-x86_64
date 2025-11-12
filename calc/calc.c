@@ -33,6 +33,13 @@ typedef enum {
   S_MINUS,
 } Sign;
 
+typedef enum {
+  RADEX_BIN = 2,
+  RADEX_OCT = 8,
+  RADEX_DEC = 10,
+  RADEX_HEX = 16,
+} Radex;
+
 void initialize();
 void input_number(char** p);
 void apply_last_op(Op last_op, Sign sign);
@@ -62,21 +69,14 @@ static void emit_lines(const char* const* lines, size_t count) {
 
 /**
  * @brief
- * コマンドライン引数の電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成するエントリポイント。
- * @param argc 引数の数。
- * @param argv 引数ベクタ。argv[1] に電卓式を受け取る。
+ * 電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成する。
+ * @param input 入力文字列。
+ * @param p 入力文字列ポインタへのポインタ。
  * @return 成功時0、入力が不正な場合は1などのエラーコード。
  */
-int main(int argc, char* argv[]) {
-  if (argc != 2) {
-    fprintf(stderr, "Usage: %s <calc_literal>\n", argv[0]);
-    return 1;
-  }
-  char* input = argv[1];
-  char** p = &input;
+int parser(char** p) {
   Sign sign = S_PLUS;
   Op last_op = PLUS;
-  initialize();
   while (**p) {
     if (is_digit(**p)) {
       // 数字を構成する
@@ -158,6 +158,24 @@ int main(int argc, char* argv[]) {
 
 /**
  * @brief
+ * コマンドライン引数の電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成するエントリポイント。
+ * @param argc 引数の数。
+ * @param argv 引数ベクタ。argv[1] に電卓式を受け取る。
+ * @return 成功時0、入力が不正な場合は1などのエラーコード。
+ */
+int main(int argc, char* argv[]) {
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <calc_literal>\n", argv[0]);
+    return 1;
+  }
+  char* input = argv[1];
+  char** p = &input;
+  initialize();
+  return parser(p);
+}
+
+/**
+ * @brief
  * 出力アセンブリのプロローグを生成し、累積レジスタとメモリ領域を初期化する。
  */
 void initialize() {
@@ -199,11 +217,36 @@ void reset_formula(Op* last_op, Sign* sign) {
  * @param p 入力文字列へのポインタを示すポインタ。読み取った桁数だけ進む。
  */
 void input_number(char** p) {
-  while (**p >= '0' && **p <= '9') {
+  Radex radex = RADEX_DEC;
+  if (**p == '0') {
+    (*p)++;
+    if (**p == 'x') {
+      // 16進数
+      radex = RADEX_HEX;
+      (*p)++;
+    } else if (**p >= '0' && **p <= '7') {
+      // 8進数
+      radex = RADEX_OCT;
+      // 次の桁から数字
+    } else if (**p == 'b') {
+      // 2進数
+      radex = RADEX_BIN;
+      (*p)++;
+    } else {
+      // 0 単独
+      printf("xorl %%eax, %%eax\n");
+      return;
+    }
+  }
+  while ((**p >= '0' && **p <= '9') || (**p >= 'a' && **p <= 'f')) {
     printf("movl %%eax, %%edi\n");
-    printf("movl $10, %%esi\n");
+    printf("movl $%d, %%esi\n", radex);
     printf("callq mul32\n");
-    printf("addl $%d, %%eax\n", **p - '0');
+    if (**p >= '0' && **p <= '9') {
+      printf("addl $%d, %%eax\n", **p - '0');
+    } else if (**p >= 'a' && **p <= 'f') {
+      printf("addl $%d, %%eax\n", **p - 'a' + 10);
+    }
     printf("jo L_overflow\n");
     (*p)++;
   }
