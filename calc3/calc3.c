@@ -20,20 +20,20 @@
 #define ASM_TEXT_SECTION ".text"
 
 typedef enum {
-  PLUS,
-  MINUS,
-  MUL,
-  DIV,
-} op;
+  PLUS = '+',
+  MINUS = '-',
+  MUL = '*',
+  DIV = '/',
+} Op;
 
 typedef enum {
   S_PLUS,
   S_MINUS,
-} sign_inversion;
+} Sign;
 
 void initialize();
 void input_number(char** p);
-void apply_last_op(op last_op, int sign);
+void apply_last_op(Op last_op, Sign sign);
 void finalize();
 bool is_digit(char c);
 bool is_operator(char c);
@@ -45,7 +45,7 @@ bool is_memory_sub(char c);
 char peek(char** p);
 void ignore_consecutive_operators(char** p);
 void ignore_all_sign_inversions(char** p);
-void reset_formula(op* last_op, int* sign);
+void reset_formula(Op* last_op, Sign* sign);
 
 /**
  * @brief 出力アセンブリの各行をまとめて出力する。
@@ -72,8 +72,8 @@ int main(int argc, char* argv[]) {
   }
   char* input = argv[1];
   char** p = &input;
-  int sign = 1;
-  op last_op = PLUS;
+  Sign sign = S_PLUS;
+  Op last_op = PLUS;
   initialize();
   while (**p) {
     if (is_digit(**p)) {
@@ -86,21 +86,8 @@ int main(int argc, char* argv[]) {
       // 現在の項を適用する
       apply_last_op(last_op, sign);
       reset_formula(&last_op, &sign);
-      // 次の演算子を設定する
-      switch (**p) {
-        case '+':
-          last_op = PLUS;
-          break;
-        case '-':
-          last_op = MINUS;
-          break;
-        case '*':
-          last_op = MUL;
-          break;
-        case '/':
-          last_op = DIV;
-          break;
-      }
+      // 次の演算子を設定する（enum に文字リテラルを割り当てたので直接代入）
+      last_op = (Op) * *p;
       (*p)++;
       // 直後の符号反転トークンをすべて読み飛ばす
       ignore_all_sign_inversions(p);
@@ -109,7 +96,7 @@ int main(int argc, char* argv[]) {
       (*p)++;
     } else if (is_sign_inversion(**p)) {
       // 符号反転トークンを適用する
-      sign *= -1;
+      sign = (sign == S_PLUS) ? S_MINUS : S_PLUS;
       (*p)++;
     } else if (**p == '=') {
       // 現在の項を適用する
@@ -197,9 +184,9 @@ void initialize() {
  * @param last_op 直前の演算子を保持する変数へのポインタ。PLUS に初期化される。
  * @param sign 現在の符号フラグへのポインタ。1 に初期化される。
  */
-void reset_formula(op* last_op, int* sign) {
+void reset_formula(Op* last_op, Sign* sign) {
   printf("xorl %%eax, %%eax\n");
-  *sign = 1;
+  *sign = S_PLUS;
   *last_op = PLUS;
 }
 
@@ -224,11 +211,11 @@ void input_number(char** p) {
  * @param last_op 適用すべき演算子。
  * @param sign 項に掛ける符号。-1 の場合は項を反転してから演算する。
  */
-void apply_last_op(op last_op, int sign) {
+void apply_last_op(Op last_op, Sign sign) {
   // 構築済みの数字が %eax にあるので %esi に移す
   printf("movl %%eax, %%esi\n");
   // 符号を反転する場合は %esi を neg する
-  if (sign == -1) {
+  if (sign == S_MINUS) {
     printf("negl %%esi\n");
     printf("jo L_overflow\n");
   }
@@ -381,7 +368,7 @@ bool is_digit(char c) { return c >= '0' && c <= '9'; }
  * @return 四則演算子であれば true。
  */
 bool is_operator(char c) {
-  return c == '+' || c == '-' || c == '*' || c == '/';
+  return c == PLUS || c == MINUS || c == MUL || c == DIV;
 }
 /**
  * @brief 文字が符号反転トークンかどうかを判定する。
