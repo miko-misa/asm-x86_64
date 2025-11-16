@@ -117,12 +117,14 @@ int parser(char** p, int nest_level) {
     } else if (is_memory_clear(**p)) {
       // メモリをクリアする
       printf("xorl %%edx, %%edx\n");
-      printf("movl %%edx, (%%rsp)\n");
+      printf("movl %%edx,  %%r11d\n");
+      /* also keep memory register initialized in prologue; r11 used as memory
+       */
       reset_formula(&last_op, &sign);
       (*p)++;
     } else if (is_memory_recall(**p)) {
       // メモリを呼び出す
-      printf("movl (%%rsp), %%edx\n");
+      printf("movl %%r11d, %%edx\n");
       if (!peek(p)) {
         finalize();
         return 0;
@@ -133,11 +135,11 @@ int parser(char** p, int nest_level) {
       // 現在の項を計算する
       apply_last_op(last_op, sign);
       // メモリから取り出す
-      printf("movl (%%rsp), %%eax\n");
+      printf("movl %%r11d, %%eax\n");
       // 加算してメモリに戻す
       printf("addl %%edx, %%eax\n");
       printf("jo L_overflow\n");
-      printf("movl %%eax, (%%rsp)\n");
+      printf("movl %%eax, %%r11d\n");
       // 計算結果はクリアする
       printf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
@@ -146,11 +148,11 @@ int parser(char** p, int nest_level) {
       // 現在の項を計算する
       apply_last_op(last_op, sign);
       // メモリから取り出す
-      printf("movl (%%rsp), %%eax\n");
+      printf("movl %%r11d, %%eax\n");
       // 減算してメモリに戻す
       printf("subl %%edx, %%eax\n");
       printf("jo L_overflow\n");
-      printf("movl %%eax, (%%rsp)\n");
+      printf("movl %%eax, %%r11d\n");
       // 計算結果はクリアする
       printf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
@@ -217,6 +219,7 @@ void initialize() {
       "xorl %eax, %eax\n",
       "pushq $0\n",
       "xorl %edx, %edx\n",
+      "xorl %r11d, %r11d\n",
   };
   emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
@@ -227,9 +230,8 @@ void initialize() {
  * @param nest_level 現在の入れ子の深さ。
  */
 int nesting(char** p, int nest_level) {
-  printf("pushq %%rdx\n");        // 現在の計算結果を保存
-  printf("pushq 8(%%rsp)\n");     // メモリ領域を重ねて保存
-  printf("xorl %%edx, %%edx\n");  // 新しい計算用にクリア
+  printf("pushq %%rdx\n");          // 現在の計算結果を保存
+  printf("xorl %%edx, %%edx\n");    // 新しい計算用にクリア
   return parser(p, nest_level + 1);
 }
 
@@ -237,11 +239,8 @@ int nesting(char** p, int nest_level) {
  * @brief 入れ子計算の終了処理を行う。
  */
 void finish_nesting() {
-  printf("movl (%%rsp), %%eax\n");    // 現在のメモリ領域を取得
-  printf("movl %%eax, 16(%%rsp)\n");  // メモリ領域を復元
-  printf("movl %%edx, %%eax\n");      // 括弧内の計算結果を %eax に移す
-  printf("addq $8, %%rsp\n");         // メモリ領域をポップ
-  printf("popq %%rdx\n");             // 計算結果を復元
+  printf("movl %%edx, %%eax\n");   // 括弧内の計算結果を %eax に移す
+  printf("popq %%rdx\n");          // 計算結果を復元
 }
 
 /**
@@ -285,7 +284,9 @@ void input_number(char** p) {
   while ((**p >= '0' && **p <= '9') || (**p >= 'a' && **p <= 'f')) {
     printf("movl %%eax, %%edi\n");
     printf("movl $%d, %%esi\n", radex);
+    printf("pushq %%r11\n");
     printf("callq mul32\n");
+    printf("popq %%r11\n");
     if (**p >= '0' && **p <= '9') {
       printf("addl $%d, %%eax\n", **p - '0');
     } else if (**p >= 'a' && **p <= 'f') {
@@ -320,7 +321,9 @@ void apply_last_op(Op last_op, Sign sign) {
       break;
     case MUL:
       printf("movl %%edx, %%edi\n");
+      printf("pushq %%r11\n");
       printf("callq mul32\n");
+      printf("popq %%r11\n");
       printf("movq %%rax, %%rcx\n");
       printf("movslq %%eax, %%rdx\n");
       printf("cmpq %%rdx, %%rcx\n");
@@ -331,14 +334,18 @@ void apply_last_op(Op last_op, Sign sign) {
       printf("testl %%esi, %%esi\n");
       printf("je L_overflow\n");
       printf("movl %%edx, %%edi\n");
+      printf("pushq %%r11\n");
       printf("callq div32\n");
+      printf("popq %%r11\n");
       printf("movl %%eax, %%edx\n");
       break;
     case MOD:
       printf("testl %%esi, %%esi\n");
       printf("je L_overflow\n");
       printf("movl %%edx, %%edi\n");
+      printf("pushq %%r11\n");
       printf("callq div32\n");
+      printf("popq %%r11\n");
       // printf("movl %%edx, %%edx\n");
       break;
   }
