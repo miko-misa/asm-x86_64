@@ -1,26 +1,37 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #if defined(TARGET_SYSTEM_LINUX)
 #define ASM_GLOBAL_MAIN "main"
 #define ASM_EXTERN_PRINTF "printf"
 #define ASM_EXTERN_EXIT "exit"
 #define ASM_CSTRING_SECTION ".section .rodata"
+#define ASM_DATA_SECTION ".section .data"
 #elif defined(TARGET_SYSTEM_MAC) || defined(__APPLE__)
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
 #define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
+#define ASM_DATA_SECTION ".section __DATA,__data"
 #else
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
 #define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
+#define ASM_DATA_SECTION ".section __DATA,__data"
 #endif
 #define ASM_TEXT_SECTION ".text"
 
 // 最大入れ子数
 #define MAX_EXPR_NESTING 128
+// 変数名最大文字数
+#define MAX_VAR_NAME_LENGTH 16
+// 最大変数数
+#define MAX_VARIABLES 128
+
+char variable_names[MAX_VARIABLES][MAX_VAR_NAME_LENGTH + 1];
+int variable_count = 0;
 
 typedef enum {
   PLUS = '+',
@@ -45,7 +56,9 @@ typedef enum {
 
 void initialize();
 void input_number(char** p);
+int input_variable(char** p);
 void apply_last_op(Op last_op, Sign sign);
+void set_variable(char** p);
 void finalize();
 bool is_digit(char c);
 bool is_operator(char c);
@@ -54,6 +67,7 @@ bool is_memory_clear(char c);
 bool is_memory_recall(char c);
 bool is_memory_add(char c);
 bool is_memory_sub(char c);
+bool is_variable_char(char c);
 char peek(char** p);
 void ignore_consecutive_operators(char** p);
 void ignore_all_sign_inversions(char** p);
@@ -86,6 +100,10 @@ int parser(char** p, int nest_level) {
     if (is_digit(**p)) {
       // 数字を構成する
       input_number(p);
+    } else if (**p == '-' && peek(p) == '>') {
+      (*p) += 2;
+      apply_last_op(last_op, sign);
+      set_variable(p);
     } else if (is_operator(**p)) {
       // 演算子を適用する
       // 最後の演算子以外を読み飛ばす
@@ -109,11 +127,20 @@ int parser(char** p, int nest_level) {
     } else if (**p == '=') {
       // 現在の項を適用する
       apply_last_op(last_op, sign);
-      // 計算結果を出力して終了する[
+      // 変数定義の場合
+      // 計算結果を出力して終了する
       if (nest_level == 0) {
         finalize();
       }
       return 0;
+    } else if (**p == ';') {
+      // 式の区切り
+      // 現在の項を適用する
+      apply_last_op(last_op, sign);
+      // 計算結果をリセット
+      printf("xorl %%edx, %%edx\n");
+      reset_formula(&last_op, &sign);
+      (*p)++;
     } else if (is_memory_clear(**p)) {
       // メモリをクリアする
       printf("xorl %%edx, %%edx\n");
@@ -171,6 +198,12 @@ int parser(char** p, int nest_level) {
       apply_last_op(last_op, sign);
       finish_nesting();
       return 0;
+    } else if (is_variable_char(**p)) {
+      // 変数名を構成する（未実装）
+      int result = input_variable(p);
+      if (result != 0) {
+        return 1;
+      }
     } else {
       fprintf(stderr, "Invalid character: %c\n", **p);
       return 1;
@@ -255,8 +288,7 @@ void reset_formula(Op* last_op, Sign* sign) {
 }
 
 /**
- * @brief 入力ポインタが指す連続した数字を読み取り、%eax
- * に10進整数値を構築する。
+ * @brief 入力ポインタが指す連続した数字を読み取り、%eax に10進整数値を構築する。
  * @param p 入力文字列へのポインタを示すポインタ。読み取った桁数だけ進む。
  */
 void input_number(char** p) {
@@ -295,6 +327,43 @@ void input_number(char** p) {
     printf("jo L_overflow\n");
     (*p)++;
   }
+}
+
+/**
+ * @brief 変数名を読み取り、対応する値を %eax に構築する。
+ * @param p 入力文字列へのポインタを示すポインタ。
+ */
+void read_variable(char** p, char* out_var_name) {
+  char var_name[MAX_VAR_NAME_LENGTH];
+  int length = 0;
+  // 変数名を読み取る
+  while (is_variable_char(**p) && length < MAX_VAR_NAME_LENGTH) {
+    var_name[length++] = **p;
+    (*p)++;
+  }
+  var_name[length] = '\0';
+  strcpy(out_var_name, var_name);
+}
+
+/**
+ * @brief 変数名を読み取り、対応する値を %eax に構築する。
+ * @param p 入力文字列へのポインタを示すポインタ。変数名分だけ進む。
+ * @return 成功時0、未定義変数の場合は1。
+ */
+int input_variable(char** p) {
+  char var_name[MAX_VAR_NAME_LENGTH];
+  read_variable(p, var_name);
+  // 変数名が登録されているか確認する
+  for (int i = 0; i < variable_count; i++) {
+    if (strcmp(variable_names[i], var_name) == 0) {
+      // 変数が見つかった場合、その値を %eax にロードする
+      printf("movl var_%s(%%rip), %%eax\n", var_name);
+      return 0;
+    }
+  }
+  // 変数が見つからなかった場合、エラーを出力する
+  fprintf(stderr, "Undefined variable: %s\n", var_name);
+  return 1;
 }
 
 /**
@@ -348,6 +417,37 @@ void apply_last_op(Op last_op, Sign sign) {
       printf("popq %%r11\n");
       // printf("movl %%edx, %%edx\n");
       break;
+  }
+}
+
+/**
+ * @brief 変数名を読み取り、現在の計算結果を対応する変数に保存する。
+ * @param p 入力文字列へのポインタを示すポインタ。変数名分だけ進む。
+ */
+void set_variable(char** p) {
+  char var_name[MAX_VAR_NAME_LENGTH];
+  read_variable(p, var_name);
+  // 現在の計算結果を変数に保存する
+  printf("movl %%edx, var_%s(%%rip)\n", var_name);
+  // 変数名が既に登録されているか確認する
+  for (int i = 0; i < variable_count; i++) {
+    if (strcmp(variable_names[i], var_name) == 0) {
+      return;
+    }
+  }
+  // 新しい変数名を登録する
+  if (variable_count < MAX_VARIABLES) {
+    strcpy(variable_names[variable_count++], var_name);
+  }
+}
+
+/**
+ * @brief 変数定義用のデータセクションを出力する。
+ */
+void finalize_variables() {
+  for (int i = 0; i < variable_count; i++) {
+    printf(ASM_DATA_SECTION "\n");
+    printf("var_%s:\n .long 0\n", variable_names[i]);
   }
 }
 
@@ -458,6 +558,7 @@ void finalize() {
       "ret\n",
   };
   emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
+  finalize_variables();
 }
 
 /**
@@ -530,3 +631,11 @@ bool is_memory_add(char c) { return c == 'P'; }
  * @return 'M' であれば true。
  */
 bool is_memory_sub(char c) { return c == 'M'; }
+/**
+ * @brief 文字が変数名に使用可能かどうかを判定する。
+ * @param c 判定対象の文字。
+ * @return 変数名に使用可能な文字であれば true。
+ */
+bool is_variable_char(char c) {
+  return (c >= 'a' && c <= 'z') || (c == '_');
+}
