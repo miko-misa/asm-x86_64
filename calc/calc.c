@@ -45,8 +45,6 @@ typedef enum {
   RADEX_HEX = 16,
 } Radex;
 
-// 最大入れ子数
-#define MAX_EXPR_NESTING 128
 // 変数・関数名最大文字数
 #define MAX_IDENTIFIER_LEN 32
 // 最大変数・関数数
@@ -99,9 +97,11 @@ void def_default_func();
 
 /**
  * @brief フォーマット付き出力をグローバル変数 is_haste に応じて遅延させる関数。
- * @param format フォーマット文字列。
- * @param ... 可変引数。
+ * @param fmt フォーマット文字列。
  * @return 本来書きたかった文字数。
+ *
+ * 可変長引数は通常の printf と同じ取り扱いで受け取り、必要に応じて
+ * FunctionInfo に書き出す。
  */
 int mprintf(const char* fmt, ...) {
   va_list ap;
@@ -162,6 +162,7 @@ static void emit_lines(const char* const* lines, size_t count) {
  * 電卓式を解析し、演算・メモリ操作に対応するアセンブリを生成する。
  * @param p 入力文字列ポインタへのポインタ。
  * @param nest_level 現在の入れ子レベル。
+ * @param is_misaligned 現在のスタックが 16 バイト境界からずれていたかどうか。
  * @return 成功時0、入力が不正な場合は1などのエラーコード。
  */
 int parser(char** p, int nest_level, int is_misaligned) {
@@ -335,6 +336,9 @@ int main(int argc, char* argv[]) {
 
 /**
  * @brief デフォルト関数定義を追加する。
+ *
+ * ビルドインではなくソース側で記述された関数テンプレートを、parser
+ * を使って事前に読み込んでおく。
  */
 void def_default_func() {
   is_haste = 0;
@@ -393,6 +397,12 @@ void clear_func_code(FunctionInfo* f) {
   f->code[0] = '\0';
 }
 
+/**
+ * @brief FunctionInfo テーブルにビルトイン関数を登録し、遅延出力バッファにコードを蓄積する。
+ *
+ * 現在は step 関数のみをハードコードしているが、同じ仕組みで追加の
+ * ビルトインを組み込める。
+ */
 void def_builtin_func() {
   is_haste = 0;
   // step function
@@ -422,6 +432,8 @@ void def_builtin_func() {
  * @brief 今から入れ子の解析を始めるための準備を行う。
  * @param p 入力文字列ポインタへのポインタ。
  * @param nest_level 現在の入れ子の深さ。
+ * @param is_misaligned 呼び出し元でスタック整列が崩れている場合は 1。
+ * @return 入れ子内の parser 実行結果。
  */
 int nesting(char** p, int nest_level, int is_misaligned) {
   mprintf(" # Entering nesting level %d\n", nest_level);
@@ -437,6 +449,7 @@ int nesting(char** p, int nest_level, int is_misaligned) {
 
 /**
  * @brief 入れ子計算の終了処理を行う。
+ * @param is_misaligned 退避時にスタック調整を行わなかったかどうか。
  */
 void finish_nesting(int is_misaligned) {
   mprintf(" # Exiting nesting level\n");
@@ -506,6 +519,7 @@ void input_number(char** p) {
 /**
  * @brief 識別子を読み取り、out_var_name に格納する。
  * @param p 入力文字列へのポインタを示すポインタ。
+ * @param out_var_name 読み取った識別子を書き込むバッファ。
  */
 void read_identifier(char** p, char* out_var_name) {
   while (**p == ' ') {
@@ -550,6 +564,8 @@ int input_variable(char** p) {
 /**
  * @brief 関数定義の開始処理を行う。
  * @param p 入力文字列へのポインタを示すポインタ。
+ *
+ * 関数名・引数数を解析し、current_function を遅延出力モードで切り替える。
  */
 void start_def_func(char** p) {
   char func_name[MAX_IDENTIFIER_LEN];
@@ -593,6 +609,7 @@ void start_def_func(char** p) {
 /**
  * @brief 関数呼び出しの処理を行う。
  * @param p 入力文字列へのポインタを示すポインタ。
+ * @param nest_level 呼び出し元の入れ子深度。
  */
 void start_call_func(char** p, int nest_level) {
   char func_name[MAX_IDENTIFIER_LEN];
@@ -747,6 +764,8 @@ void set_variable(char** p) {
 
 /**
  * @brief 変数定義用のデータセクションを出力する。
+ *
+ * parser 中に `->` で登録された全変数について .data/.rodata を発行する。
  */
 void finalize_variables() {
   for (int i = 0; i < variable_count; i++) {
@@ -757,6 +776,9 @@ void finalize_variables() {
 
 /**
  * @brief 関数定義部分を出力する。
+ *
+ * 遅延出力された各 FunctionInfo の本体を .text として展開し、簡易 prologue/epilogue
+ * を付与して再利用できるようにする。
  */
 void finalize_functions() {
   for (int i = 0; i < function_count; i++) {
@@ -778,7 +800,7 @@ void finalize_functions() {
 }
 
 /**
- * @brief 計算結果の表示とスタック後始末を行うアセンブリを生成する。
+ * @brief 計算結果およびエラー表示、サポート関数定義まで含めた終端コードを生成する。
  */
 void finalize() {
   static const char* const lines[] = {

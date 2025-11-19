@@ -3,13 +3,16 @@ CPPFLAGS ?=
 CFLAGS ?= -Wall -Wextra -std=c11 -arch x86_64
 ASFLAGS ?= -g -Og -arch x86_64
 
+# BIN falls back to SRC basename when omitted
+BIN_OUTPUT = $(if $(BIN),$(BIN),$(basename $(SRC)))
+
 .PHONY: parser program clean
 
 parser:
 	@if [ -z "$(SRC)" ]; then echo "error: SRC is not set" >&2; exit 1; fi
-	@if [ -z "$(BIN)" ]; then echo "error: BIN is not set" >&2; exit 1; fi
-	@mkdir -p "$$(dirname "$(BIN)")"
-	$(CC) $(CPPFLAGS) $(CFLAGS) "$(SRC)" -o "$(BIN)"
+	@if [ -z "$(BIN_OUTPUT)" ]; then echo "error: failed to determine BIN" >&2; exit 1; fi
+	@mkdir -p "$$(dirname "$(BIN_OUTPUT)")"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$(SRC)" -o "$(BIN_OUTPUT)"
 
 program:
 	@if [ -z "$(ASM)" ]; then echo "error: ASM is not set" >&2; exit 1; fi
