@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 
 #if defined(TARGET_SYSTEM_LINUX)
 #define ASM_GLOBAL_MAIN "main"
@@ -23,16 +24,6 @@
 #endif
 #define ASM_TEXT_SECTION ".text"
 
-// 最大入れ子数
-#define MAX_EXPR_NESTING 128
-// 変数名最大文字数
-#define MAX_VAR_NAME_LENGTH 16
-// 最大変数数
-#define MAX_VARIABLES 128
-
-char variable_names[MAX_VARIABLES][MAX_VAR_NAME_LENGTH + 1];
-int variable_count = 0;
-
 typedef enum {
   PLUS = '+',
   MINUS = '-',
@@ -54,9 +45,38 @@ typedef enum {
   RADEX_HEX = 16,
 } Radex;
 
+// 最大入れ子数
+#define MAX_EXPR_NESTING 128
+// 変数・関数名最大文字数
+#define MAX_IDENTIFIER_LEN 32
+// 最大変数・関数数
+#define MAX_VAR_FUNC 128
+// 最大関数定義部分
+#define MAX_FUNCTION_CODE_LENGTH (1024 * 1024)
+// 最大引数数
+#define MAX_ARGUMENTS 16
+
+typedef struct {
+  char name[MAX_IDENTIFIER_LEN + 1];
+  int arg_count;
+  char code[MAX_FUNCTION_CODE_LENGTH];
+  size_t code_length;
+} FunctionInfo;
+
+char variable_names[MAX_VAR_FUNC][MAX_IDENTIFIER_LEN + 1];
+int variable_count = 0;
+
+int is_haste = 1;  // 1: 即時出力モード、0: 遅延出力モード
+
+FunctionInfo functions[MAX_VAR_FUNC];
+int function_count = 0;
+FunctionInfo* current_function = NULL;
+
 void initialize();
 void input_number(char** p);
 int input_variable(char** p);
+void start_def_func(char** p);
+void start_call_func(char** p, int nest_level);
 void apply_last_op(Op last_op, Sign sign);
 void set_variable(char** p);
 void finalize();
@@ -67,13 +87,64 @@ bool is_memory_clear(char c);
 bool is_memory_recall(char c);
 bool is_memory_add(char c);
 bool is_memory_sub(char c);
-bool is_variable_char(char c);
+bool is_identifier_char(char c);
 char peek(char** p);
 void ignore_consecutive_operators(char** p);
 void ignore_all_sign_inversions(char** p);
 void reset_formula(Op* last_op, Sign* sign);
-int nesting(char** p, int nest_level);
-void finish_nesting();
+int nesting(char** p, int nest_level, int is_misaligned);
+void finish_nesting(int is_misaligned);
+void def_builtin_func();
+void def_default_func();
+
+/**
+ * @brief フォーマット付き出力をグローバル変数 is_haste に応じて遅延させる関数。
+ * @param format フォーマット文字列。
+ * @param ... 可変引数。
+ * @return 本来書きたかった文字数。
+ */
+int mprintf(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+
+  if (is_haste) {
+    // ふつうに mprintf
+    int ret = vprintf(fmt, ap);
+    va_end(ap);
+    return ret;
+  } else {
+    if (!current_function) {
+      va_end(ap);
+      return 0;
+    }
+    FunctionInfo* t = current_function;
+    size_t capacity = sizeof(t->code);
+    if (t->code_length >= capacity) {
+      // もうこれ以上は入らない
+      va_end(ap);
+      return 0;
+    }
+
+    size_t remaining = capacity - t->code_length;
+    char* dest = t->code + t->code_length;
+
+    int written = vsnprintf(dest, remaining, fmt, ap);
+    va_end(ap);
+
+    if (written < 0) {
+      // フォーマットエラー
+      return written;
+    }
+
+    if ((size_t)written >= remaining) {
+      // バッファが足りない
+      t->code_length = capacity - 1;
+    } else {
+      t->code_length += (size_t)written;
+    }
+    return written;
+  }
+}
 
 /**
  * @brief 出力アセンブリの各行をまとめて出力する。
@@ -93,13 +164,23 @@ static void emit_lines(const char* const* lines, size_t count) {
  * @param nest_level 現在の入れ子レベル。
  * @return 成功時0、入力が不正な場合は1などのエラーコード。
  */
-int parser(char** p, int nest_level) {
+int parser(char** p, int nest_level, int is_misaligned) {
   Sign sign = S_PLUS;
   Op last_op = PLUS;
   while (**p) {
     if (is_digit(**p)) {
       // 数字を構成する
       input_number(p);
+    } else if (**p == '!') {
+      (*p)++;
+      start_def_func(p);
+      if (!peek(p)) {
+        finalize();
+        return 0;
+      }
+    } else if (**p == '@') {
+      (*p)++;
+      start_call_func(p, nest_level);
     } else if (**p == '-' && peek(p) == '>') {
       (*p) += 2;
       apply_last_op(last_op, sign);
@@ -138,20 +219,25 @@ int parser(char** p, int nest_level) {
       // 現在の項を適用する
       apply_last_op(last_op, sign);
       // 計算結果をリセット
-      printf("xorl %%edx, %%edx\n");
+      if (current_function == NULL) {
+        mprintf("xorl %%edx, %%edx\n");
+      }
       reset_formula(&last_op, &sign);
+      // 関数定義についてもリセット
+      is_haste = 1;
+      current_function = NULL;
       (*p)++;
     } else if (is_memory_clear(**p)) {
       // メモリをクリアする
-      printf("xorl %%edx, %%edx\n");
-      printf("movl %%edx,  %%r11d\n");
+      mprintf("xorl %%edx, %%edx\n");
+      mprintf("movl %%edx,  %%r11d\n");
       /* also keep memory register initialized in prologue; r11 used as memory
        */
       reset_formula(&last_op, &sign);
       (*p)++;
     } else if (is_memory_recall(**p)) {
       // メモリを呼び出す
-      printf("movl %%r11d, %%edx\n");
+      mprintf("movl %%r11d, %%edx\n");
       if (!peek(p)) {
         finalize();
         return 0;
@@ -162,48 +248,64 @@ int parser(char** p, int nest_level) {
       // 現在の項を計算する
       apply_last_op(last_op, sign);
       // メモリから取り出す
-      printf("movl %%r11d, %%eax\n");
+      mprintf("movl %%r11d, %%eax\n");
       // 加算してメモリに戻す
-      printf("addl %%edx, %%eax\n");
-      printf("jo L_overflow\n");
-      printf("movl %%eax, %%r11d\n");
+      mprintf("addl %%edx, %%eax\n");
+      mprintf("jo L_overflow\n");
+      mprintf("movl %%eax, %%r11d\n");
       // 計算結果はクリアする
-      printf("xorl %%edx, %%edx\n");
+      mprintf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
       (*p)++;
     } else if (is_memory_sub(**p)) {
       // 現在の項を計算する
       apply_last_op(last_op, sign);
       // メモリから取り出す
-      printf("movl %%r11d, %%eax\n");
+      mprintf("movl %%r11d, %%eax\n");
       // 減算してメモリに戻す
-      printf("subl %%edx, %%eax\n");
-      printf("jo L_overflow\n");
-      printf("movl %%eax, %%r11d\n");
+      mprintf("subl %%edx, %%eax\n");
+      mprintf("jo L_overflow\n");
+      mprintf("movl %%eax, %%r11d\n");
       // 計算結果はクリアする
-      printf("xorl %%edx, %%edx\n");
+      mprintf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
       (*p)++;
     } else if (**p == '(') {
       // 入れ子開始
       (*p)++;
-      int result = nesting(p, nest_level);
+      int result = nesting(p, nest_level, 0);
       if (result != 0) {
         return result;
       }
+    } else if (**p == ',') {
+      // 引数区切り
+      apply_last_op(last_op, sign);
+      finish_nesting(is_misaligned);
+      return 0;
     } else if (**p == ')') {
       // 入れ子終了
       (*p)++;
       // 現在の項を適用する
       apply_last_op(last_op, sign);
-      finish_nesting();
+      finish_nesting(is_misaligned);
       return 0;
-    } else if (is_variable_char(**p)) {
+    } else if (is_identifier_char(**p)) {
       // 変数名を構成する（未実装）
       int result = input_variable(p);
       if (result != 0) {
         return 1;
       }
+    } else if (**p == '#' && current_function != NULL) {
+      // 関数内引数参照
+      (*p)++;
+      int arg_index = 0;
+      while (is_digit(**p)) {
+        arg_index = arg_index * 10 + (**p - '0');
+        (*p)++;
+      }
+      arg_index = current_function->arg_count - arg_index;
+      int offset = 16 + arg_index * 8;
+      mprintf("movl %d(%%rbp), %%eax\n", offset);
     } else {
       fprintf(stderr, "Invalid character: %c\n", **p);
       return 1;
@@ -227,12 +329,37 @@ int main(int argc, char* argv[]) {
   char* input = argv[1];
   char** p = &input;
   initialize();
-  return parser(p, 0);
+  def_default_func();
+  return parser(p, 0, 0);
+}
+
+/**
+ * @brief デフォルト関数定義を追加する。
+ */
+void def_default_func() {
+  is_haste = 0;
+  static const char* codes[] = {
+    "!sgn[1]:@step(#1)-@step(#1S);",
+    "!abs[1]:@sgn(#1)*#1;",
+    "!gt[2]:@step(#1-#2);",
+    "!ge[2]:1-@step(#2-#1);",
+    "!eq[2]:1-@step(@abs(#1-#2));",
+    "!ne[2]:1-@eq(#1,#2);",
+    "!min[2]:#1+#2-@abs(#1-#2)/2;",
+    "!max[2]:#1+#2+@abs(#1-#2)/2;",
+    "!if[3]:@abs(@sgn(#1))*(#2-#3)+#3;",
+  };
+  for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
+    char* p = (char*)codes[i];
+    parser(&p, 0, 0);
+  }
+  is_haste = 1;
 }
 
 /**
  * @brief
  * 出力アセンブリのプロローグを生成し、累積レジスタとメモリ領域を初期化する。
+ * ビルドイン関数も定義する。
  */
 void initialize() {
   static const char* const lines[] = {
@@ -250,11 +377,45 @@ void initialize() {
       "pushq %rbp\n",
       "movq %rsp, %rbp\n",
       "xorl %eax, %eax\n",
-      "pushq $0\n",
       "xorl %edx, %edx\n",
       "xorl %r11d, %r11d\n",
   };
   emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
+  def_builtin_func();
+}
+
+/**
+ * @brief 関数情報を初期化する。
+ * @param f 初期化する関数情報へのポインタ。
+ */
+void clear_func_code(FunctionInfo* f) {
+  f->code_length = 0;
+  f->code[0] = '\0';
+}
+
+void def_builtin_func() {
+  is_haste = 0;
+  // step function
+  FunctionInfo* f = &functions[function_count++];
+  clear_func_code(f);
+  strcpy(f->name, "step");
+  f->arg_count = 1;
+  static const char* const lines[] = {
+      " # Built-in function: step\n",
+      " # Argument in %edi\n",
+      "movl 16(%rbp), %edx\n",
+      "testl %edx, %edx\n",
+      "jg .Lpositive\n",
+      "xorl %edx, %edx\n",
+      "jmp .Ldone\n",
+      ".Lpositive:\n",
+      "movl $1, %edx\n",
+      ".Ldone:\n",
+  };
+  for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+    strcat(f->code, lines[i]);
+  }
+  is_haste = 1;
 }
 
 /**
@@ -262,33 +423,44 @@ void initialize() {
  * @param p 入力文字列ポインタへのポインタ。
  * @param nest_level 現在の入れ子の深さ。
  */
-int nesting(char** p, int nest_level) {
-  printf("pushq %%rdx\n");          // 現在の計算結果を保存
-  printf("xorl %%edx, %%edx\n");    // 新しい計算用にクリア
-  return parser(p, nest_level + 1);
+int nesting(char** p, int nest_level, int is_misaligned) {
+  mprintf(" # Entering nesting level %d\n", nest_level);
+  if (!is_misaligned) {
+    mprintf("subq $8, %%rsp\n");     // スタック調整
+  }
+  mprintf("pushq %%rdx\n");        // 現在の計算結果を保存
+  mprintf("xorl %%edx, %%edx\n");  // 新しい計算用にクリア
+  mprintf("xorl %%eax, %%eax\n");
+  mprintf(" # Starting parser at nesting level %d\n", nest_level);
+  return parser(p, nest_level + 1, is_misaligned);
 }
 
 /**
  * @brief 入れ子計算の終了処理を行う。
  */
-void finish_nesting() {
-  printf("movl %%edx, %%eax\n");   // 括弧内の計算結果を %eax に移す
-  printf("popq %%rdx\n");          // 計算結果を復元
+void finish_nesting(int is_misaligned) {
+  mprintf(" # Exiting nesting level\n");
+  mprintf("movl %%edx, %%eax\n");  // 括弧内の計算結果を %eax に移す
+  mprintf("popq %%rdx\n");         // 計算結果を復元
+  if (!is_misaligned) {
+    mprintf("addq $8, %%rsp\n");     // スタック調整を戻す
+  }
+  mprintf(" # Finished nesting level\n");
 }
-
 /**
  * @brief 次の項の解析に備えて状態をリセットする。
  * @param last_op 直前の演算子を保持する変数へのポインタ。PLUS に初期化される。
  * @param sign 現在の符号フラグへのポインタ。1 に初期化される。
  */
 void reset_formula(Op* last_op, Sign* sign) {
-  printf("xorl %%eax, %%eax\n");
+  mprintf("xorl %%eax, %%eax\n");
   *sign = S_PLUS;
   *last_op = PLUS;
 }
 
 /**
- * @brief 入力ポインタが指す連続した数字を読み取り、%eax に10進整数値を構築する。
+ * @brief 入力ポインタが指す連続した数字を読み取り、%eax
+ * に10進整数値を構築する。
  * @param p 入力文字列へのポインタを示すポインタ。読み取った桁数だけ進む。
  */
 void input_number(char** p) {
@@ -309,40 +481,49 @@ void input_number(char** p) {
       (*p)++;
     } else {
       // 0 単独
-      printf("xorl %%eax, %%eax\n");
+      mprintf("xorl %%eax, %%eax\n");
       return;
     }
   }
   while ((**p >= '0' && **p <= '9') || (**p >= 'a' && **p <= 'f')) {
-    printf("movl %%eax, %%edi\n");
-    printf("movl $%d, %%esi\n", radex);
-    printf("pushq %%r11\n");
-    printf("callq mul32\n");
-    printf("popq %%r11\n");
+    mprintf("movl %%eax, %%edi\n");
+    mprintf("movl $%d, %%esi\n", radex);
+    mprintf("subq $8, %%rsp\n");
+    mprintf("pushq %%r11\n");
+    mprintf("callq mul32\n");
+    mprintf("popq %%r11\n");
+    mprintf("addq $8, %%rsp\n");
     if (**p >= '0' && **p <= '9') {
-      printf("addl $%d, %%eax\n", **p - '0');
+      mprintf("addl $%d, %%eax\n", **p - '0');
     } else if (**p >= 'a' && **p <= 'f') {
-      printf("addl $%d, %%eax\n", **p - 'a' + 10);
+      mprintf("addl $%d, %%eax\n", **p - 'a' + 10);
     }
-    printf("jo L_overflow\n");
+    mprintf("jo L_overflow\n");
     (*p)++;
   }
 }
 
 /**
- * @brief 変数名を読み取り、対応する値を %eax に構築する。
+ * @brief 識別子を読み取り、out_var_name に格納する。
  * @param p 入力文字列へのポインタを示すポインタ。
  */
-void read_variable(char** p, char* out_var_name) {
-  char var_name[MAX_VAR_NAME_LENGTH];
+void read_identifier(char** p, char* out_var_name) {
+  while (**p == ' ') {
+    (*p)++;
+  }
+  char var_name[MAX_IDENTIFIER_LEN];
   int length = 0;
   // 変数名を読み取る
-  while (is_variable_char(**p) && length < MAX_VAR_NAME_LENGTH) {
+  while (is_identifier_char(**p) && length < MAX_IDENTIFIER_LEN) {
     var_name[length++] = **p;
     (*p)++;
   }
   var_name[length] = '\0';
   strcpy(out_var_name, var_name);
+  // 空白を読み飛ばす
+  while (**p == ' ') {
+    (*p)++;
+  }
 }
 
 /**
@@ -351,13 +532,13 @@ void read_variable(char** p, char* out_var_name) {
  * @return 成功時0、未定義変数の場合は1。
  */
 int input_variable(char** p) {
-  char var_name[MAX_VAR_NAME_LENGTH];
-  read_variable(p, var_name);
+  char var_name[MAX_IDENTIFIER_LEN];
+  read_identifier(p, var_name);
   // 変数名が登録されているか確認する
   for (int i = 0; i < variable_count; i++) {
     if (strcmp(variable_names[i], var_name) == 0) {
       // 変数が見つかった場合、その値を %eax にロードする
-      printf("movl var_%s(%%rip), %%eax\n", var_name);
+      mprintf("movl var_%s(%%rip), %%eax\n", var_name);
       return 0;
     }
   }
@@ -367,55 +548,171 @@ int input_variable(char** p) {
 }
 
 /**
+ * @brief 関数定義の開始処理を行う。
+ * @param p 入力文字列へのポインタを示すポインタ。
+ */
+void start_def_func(char** p) {
+  char func_name[MAX_IDENTIFIER_LEN];
+  read_identifier(p, func_name);
+  if (**p != '[') {
+    fprintf(stderr, "Expected '[' after function name: %s\n", func_name);
+    return;
+  }
+  (*p)++;  // '[' をスキップ
+  // 引数の数を読む
+  int arg_count = 0;
+  while (is_digit(**p)) {
+    arg_count = arg_count * 10 + (**p - '0');
+    (*p)++;
+  }
+  if (**p != ']' || peek(p) != ':') {
+    fprintf(stderr, "Expected \"]:\" after argument count: %s\n", func_name);
+    return;
+  }
+  (*p)++;  // ']' をスキップ
+  (*p)++;  // ':' をスキップ
+  // 既存の同盟名関数があるか確認する
+  int found = -1;
+  for (int i = 0; i < function_count; i++) {
+    if (strcmp(functions[i].name, func_name) == 0) {
+      found = i;
+      break;
+    }
+  }
+  // 関数情報を作成する
+  if (function_count < MAX_VAR_FUNC) {
+    current_function = &functions[found < 0 ? function_count++ : found];
+    strcpy(current_function->name, func_name);
+    current_function->arg_count = arg_count;
+    current_function->code_length = 0;
+    current_function->code[0] = '\0';
+    is_haste = 0;  // 遅延出力モードに切り替え
+  }
+}
+
+/**
+ * @brief 関数呼び出しの処理を行う。
+ * @param p 入力文字列へのポインタを示すポインタ。
+ */
+void start_call_func(char** p, int nest_level) {
+  char func_name[MAX_IDENTIFIER_LEN];
+  read_identifier(p, func_name);
+  // 既存の同盟名関数があるか確認する
+  int found = -1;
+  for (int i = 0; i < function_count; i++) {
+    if (strcmp(functions[i].name, func_name) == 0) {
+      found = i;
+      break;
+    }
+  }
+  if (found < 0) {
+    fprintf(stderr, "Undefined function: %s\n", func_name);
+    return;
+  }
+  if (**p != '(') {
+    fprintf(stderr, "Expected '(' after function name: %s\n", func_name);
+    return;
+  }
+  (*p)++;  // '(' をスキップ
+  FunctionInfo* f = &functions[found];
+  int align = 0;
+  // まずは現在の計算結果をスタックに保存する
+  if (f->arg_count % 2 == 0) {
+    mprintf("subq $8, %%rsp\n");  // スタック調整（引数が偶数個の場合）
+    align += 8;
+  }
+
+  align += 8;
+  // 現在の計算結果を保存する
+  mprintf("pushq %%rdx\n");
+  // 引数をスタックに積む
+  mprintf("  # Calling function %s with %d arguments\n", func_name, f->arg_count);
+  for (int i = 0; i < f->arg_count; i++) {
+    mprintf("  # Argument %d:\n", i + 1);
+    nesting(p, nest_level, align % 16 == 0 ? 0 : 1);
+    if (i < f->arg_count - 1 && **p == ',') {
+      (*p)++;  // ',' をスキップ
+    } else if (i == f->arg_count - 1) {
+      // 最後の引数の後の ')' はスキップされてる
+    } else {
+      fprintf(stderr, "Expected ',' or ')' after argument %d of function %s\n", i + 1, func_name);
+      return;
+    }
+    align += 8;
+    mprintf("pushq %%rax\n");  // 引数をスタックに積む
+    mprintf("  # Result of argument %d in %%eax\n", i + 1);
+  }
+  mprintf("callq func_%s\n", func_name);
+  // スタックを引数分だけ戻す
+  if (f->arg_count > 0) {
+    mprintf("addq $%d, %%rsp\n", f->arg_count * 8);
+  }
+  // 返り値は %eax にあるからOK
+  // 保存していた計算結果を復元する
+  mprintf("popq %%rdx\n");
+  if (f->arg_count % 2 == 0) {
+    mprintf("addq $8, %%rsp\n");  // スタック調整を戻す（引数が偶数個の場合）
+  }
+}
+
+
+
+/**
  * @brief 直前の演算子と符号に基づき、%edx の累積結果に現在の項を適用する。
  * @param last_op 適用すべき演算子。
  * @param sign 項に掛ける符号。-1 の場合は項を反転してから演算する。
  */
 void apply_last_op(Op last_op, Sign sign) {
   // 構築済みの数字が %eax にあるので %esi に移す
-  printf("movl %%eax, %%esi\n");
+  mprintf("movl %%eax, %%esi\n");
   // 符号を反転する場合は %esi を neg する
   if (sign == S_MINUS) {
-    printf("negl %%esi\n");
-    printf("jo L_overflow\n");
+    mprintf("negl %%esi\n");
+    mprintf("jo L_overflow\n");
   }
   switch (last_op) {
     case PLUS:
-      printf("addl %%esi, %%edx\n");
-      printf("jo L_overflow\n");
+      mprintf("addl %%esi, %%edx\n");
+      mprintf("jo L_overflow\n");
       break;
     case MINUS:
-      printf("subl %%esi, %%edx\n");
-      printf("jo L_overflow\n");
+      mprintf("subl %%esi, %%edx\n");
+      mprintf("jo L_overflow\n");
       break;
     case MUL:
-      printf("movl %%edx, %%edi\n");
-      printf("pushq %%r11\n");
-      printf("callq mul32\n");
-      printf("popq %%r11\n");
-      printf("movq %%rax, %%rcx\n");
-      printf("movslq %%eax, %%rdx\n");
-      printf("cmpq %%rdx, %%rcx\n");
-      printf("jne L_overflow\n");
-      printf("movl %%eax, %%edx\n");
+      mprintf("movl %%edx, %%edi\n");
+      mprintf("subq $8, %%rsp\n");
+      mprintf("pushq %%r11\n");
+      mprintf("callq mul32\n");
+      mprintf("popq %%r11\n");
+      mprintf("addq $8, %%rsp\n");
+      mprintf("movq %%rax, %%rcx\n");
+      mprintf("movslq %%eax, %%rdx\n");
+      mprintf("cmpq %%rdx, %%rcx\n");
+      mprintf("jne L_overflow\n");
+      mprintf("movl %%eax, %%edx\n");
       break;
     case DIV:
-      printf("testl %%esi, %%esi\n");
-      printf("je L_overflow\n");
-      printf("movl %%edx, %%edi\n");
-      printf("pushq %%r11\n");
-      printf("callq div32\n");
-      printf("popq %%r11\n");
-      printf("movl %%eax, %%edx\n");
+      mprintf("testl %%esi, %%esi\n");
+      mprintf("je L_overflow\n");
+      mprintf("movl %%edx, %%edi\n");
+      mprintf("subq $8, %%rsp\n");
+      mprintf("pushq %%r11\n");
+      mprintf("callq div32\n");
+      mprintf("popq %%r11\n");
+      mprintf("addq $8, %%rsp\n");
+      mprintf("movl %%eax, %%edx\n");
       break;
     case MOD:
-      printf("testl %%esi, %%esi\n");
-      printf("je L_overflow\n");
-      printf("movl %%edx, %%edi\n");
-      printf("pushq %%r11\n");
-      printf("callq div32\n");
-      printf("popq %%r11\n");
-      // printf("movl %%edx, %%edx\n");
+      mprintf("testl %%esi, %%esi\n");
+      mprintf("je L_overflow\n");
+      mprintf("movl %%edx, %%edi\n");
+      mprintf("subq $8, %%rsp\n");
+      mprintf("pushq %%r11\n");
+      mprintf("callq div32\n");
+      mprintf("popq %%r11\n");
+      mprintf("addq $8, %%rsp\n");
+      // mprintf("movl %%edx, %%edx\n");
       break;
   }
 }
@@ -425,10 +722,10 @@ void apply_last_op(Op last_op, Sign sign) {
  * @param p 入力文字列へのポインタを示すポインタ。変数名分だけ進む。
  */
 void set_variable(char** p) {
-  char var_name[MAX_VAR_NAME_LENGTH];
-  read_variable(p, var_name);
+  char var_name[MAX_IDENTIFIER_LEN];
+  read_identifier(p, var_name);
   // 現在の計算結果を変数に保存する
-  printf("movl %%edx, var_%s(%%rip)\n", var_name);
+  mprintf("movl %%edx, var_%s(%%rip)\n", var_name);
   // 変数名が既に登録されているか確認する
   for (int i = 0; i < variable_count; i++) {
     if (strcmp(variable_names[i], var_name) == 0) {
@@ -436,7 +733,7 @@ void set_variable(char** p) {
     }
   }
   // 新しい変数名を登録する
-  if (variable_count < MAX_VARIABLES) {
+  if (variable_count < MAX_VAR_FUNC) {
     strcpy(variable_names[variable_count++], var_name);
   }
 }
@@ -452,29 +749,44 @@ void finalize_variables() {
 }
 
 /**
+ * @brief 関数定義部分を出力する。
+ */
+void finalize_functions() {
+  for (int i = 0; i < function_count; i++) {
+    FunctionInfo* f = &functions[i];
+    printf(ASM_TEXT_SECTION "\n");
+    printf(".globl func_%s\n", f->name);
+    printf("func_%s:\n", f->name);
+    printf("pushq %%rbp\n");
+    printf("movq %%rsp, %%rbp\n");
+    printf("xorl %%eax, %%eax\n");
+    printf("xorl %%edx, %%edx\n");
+    // 関数本体コードを出力する
+    fputs(f->code, stdout);
+    // 関数終了処理
+    printf("movl %%edx, %%eax\n");
+    printf("leave\n");
+    printf("ret\n");
+  }
+}
+
+/**
  * @brief 計算結果の表示とスタック後始末を行うアセンブリを生成する。
  */
 void finalize() {
   static const char* const lines[] = {
-      "subq $8, %rsp\n",
       "movl %edx, %esi\n",
       "leaq L_fmt(%rip), %rdi\n",
       "movl $0, %eax\n",
       "callq " ASM_EXTERN_PRINTF "\n",
-      "addq $8, %rsp\n",
-      "addq $8, %rsp\n",
       "xorl %eax, %eax\n",
       "leave\n",
       "ret\n",
       "L_overflow:\n",
-      "subq $8, %rsp\n",
       "leaq L_err(%rip), %rdi\n",
       "movl $0, %eax\n",
       "callq " ASM_EXTERN_PRINTF "\n",
-      "addq $8, %rsp\n",
-      "addq $8, %rsp\n",
       "leave\n",
-      "subq $8, %rsp\n",
       "movl $1, %edi\n",
       "callq " ASM_EXTERN_EXIT "\n",
       ".globl div32\n",
@@ -506,12 +818,12 @@ void finalize() {
       "popq %rdi\n",
       "testl $0x80000000, %edi\n",
       "jz .L_div32_quotient_neg\n",
-      "negl %edx\n",
+      "negq %rdx\n",
       ".L_div32_quotient_neg:\n",
       "xorl %edi, %esi\n",
       "testl $0x80000000, %esi\n",
       "jz .L_div32_end\n",
-      "negl %eax\n",
+      "negq %rax\n",
       ".L_div32_end:\n",
       "leave\n",
       "ret\n",
@@ -542,7 +854,7 @@ void finalize() {
       "xorl %edi, %esi\n",
       "testl $0x80000000, %esi\n",
       "jz .L_mul32_end\n",
-      "negl %eax\n",
+      "negq %rax\n",
       ".L_mul32_end:\n",
       "leave\n",
       "ret\n",
@@ -558,6 +870,7 @@ void finalize() {
       "ret\n",
   };
   emit_lines(lines, sizeof(lines) / sizeof(lines[0]));
+  finalize_functions();
   finalize_variables();
 }
 
@@ -636,6 +949,4 @@ bool is_memory_sub(char c) { return c == 'M'; }
  * @param c 判定対象の文字。
  * @return 変数名に使用可能な文字であれば true。
  */
-bool is_variable_char(char c) {
-  return (c >= 'a' && c <= 'z') || (c == '_');
-}
+bool is_identifier_char(char c) { return (c >= 'a' && c <= 'z') || (c == '_'); }
