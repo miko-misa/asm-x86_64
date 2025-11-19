@@ -132,9 +132,9 @@ while IFS= read -r raw_line || [[ -n $raw_line ]]; do
 		echo "Invalid test case (missing comma): $raw_line" >&2
 		exit 1
 	fi
-	expression=${line%%,*}
+	expression=${line%,*}
 	expression=$(printf "%s" "$expression" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-	expected=${line#*,}
+	expected=${line##*,}
 	expected=$(printf "%s" "$expected" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 	[[ -z $expression ]] && continue
 	(( ++total ))

@@ -642,6 +642,13 @@ void start_call_func(char** p, int nest_level) {
     mprintf("pushq %%rax\n");  // 引数をスタックに積む
     mprintf("  # Result of argument %d in %%eax\n", i + 1);
   }
+  if (f->arg_count == 0) {
+    if (**p != ')') {
+      fprintf(stderr, "Expected ')' to close call to function %s\n", func_name);
+      return;
+    }
+    (*p)++;
+  }
   mprintf("callq func_%s\n", func_name);
   // スタックを引数分だけ戻す
   if (f->arg_count > 0) {
