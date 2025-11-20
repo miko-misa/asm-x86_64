@@ -1,0 +1,130 @@
+1=,1
+12345=,12345
+1+2=,3
+0+1+2+3+4+5+6+7+8+9+10=,55
+1+2*3=,9
+12+34*56=,2576
+10*2+40/4=,15
+10*2+40/4+15*2*3=,180
+12S+34=,22
+12SS+34=,46
+1S2S+34=,46
+12-34=,-22
+1234/57=,21
+1234S/57=,-21
+1234S/57S=,21
+CR,0
+2PC3PR,3
+12P34*56PR,1916
+2+2P40/4MR,-6
+10*2P40/4MR,10
+10*2P40/4P15*2*3PR,120
+2147483647+1=,E
+1+1-0/0=,E
+10%3=,1
+7%3=,1
+2%4=,2
+5%5=,0
+0b101=,5
+0b101+0b10=,7
+011=,9
+07+01=,8
+0x1f=,31
+0xff=,255
+0x10+10=,26
+0x1f%0b10=,1
+0xa+05=,15
+1+(2/3)=,1
+(1)=,1
+((1))=,1
+2*(3+4)=,14
+1+2*(3+4)=,21
+(1+2)*3=,9
+10/(2*(2+3))=,1
+(0x10+0x10)*2=,64
+3*((2+3)*(4+1))=,75
+1+(2*(3+(4*5)))=,47
+2*((1+2)*(3+4))=,42
+# Parentheses combined with memory operations
+(1+2)PR=,3
+C(1+2)PR=,3
+(2*3)P(1+1)PR=,8
+(2+3)P(4+1)PR=,10
+((1P)R)=,1
+C(1P)R=,1
+C(2P3P)R=,5
+# Deep nesting with multiple memory ops
+C1+3*2/3P5*(2+5P)R,9
+C1+3*2/3P5*(2+5P1+3)=,20
+# Function definitions and calls
+!double[1]{#1+#1};@double(21)=,42
+!adder[2]{#1+#2};10+@adder(3,4)=,17
+!square[1]{#1*#1};!quad[1]{@square(@square(#1))};@quad(2)=,16
+!const_zero[0]{0};@const_zero()=,0
+!foo[1]{#1+#1};!foo[2]{#1+#2};@foo(5,7)=,12
+!store_value[1]{#1->saved_value};@store_value(34);saved_value=,34
+!sum_ten[10]{#1+#2+#3+#4+#5+#6+#7+#8+#9+#10};@sum_ten(1,2,3,4,5,6,7,8,9,10)=,55
+!mix[2]{@abs(#1-#2)+#1+#2};@mix(10,4)=,20
+!double[1]{#1+#1};(@double(3)+@double(5))=,16
+!clamp[3]{@max(#1,@min(#2,#3))};@clamp(0,15,10)=,10
+5->big_var;!use_var[0]{big_var+big_var};@use_var()=,10
+!mem_add[2]{(#1+#2)P};C;@mem_add(3,4);R=,7
+!take_ten[10]{#10};@take_ten(1,2,3,4,5,6,7,8,9,10)=,10
+# Built-in and default helper validation
+@step(5)=,1
+@step(5S)=,0
+@step(0)=,0
+@abs(5S)=,5
+@sgn(5)=,1
+@sgn(5S)=,-1
+@sgn(0)=,0
+@min(7,2)=,2
+@max(1,9)=,9
+@eq(5,5)=,1
+@ne(5,5)=,0
+@gt(6,3)=,1
+@ge(4,4)=,1
+@ge(3,4)=,0
+@if(0,111,222)=,222
+@if(5,111,222)=,111
+@if(5S,111,222)=,111
+# $if expression
+$if(1){10}{20}=,10
+$if(0){10}{20}=,20
+1+$if(@eq(1,0)){1+2}{3*4}*3=,39
+$if(1){$if(0){1}{2}}{3}=,2
+$if(0){1}{$if(1){2}{3}}=,2
+!abs_if[1]{$if(@ge(#1,0)){#1}{0-#1}};@abs_if(-5)=,5
+!max_if[2]{$if(@gt(#1,#2)){#1}{#2}};@max_if(10,20)=,20
+# Identifier and assignment handling
+1+2->very_long_variable_name;very_long_variable_name+3=,6
+!capture[1]{#1->temp_result};@capture(99);temp_result=,99
+# Semicolon inside function definition
+!sq_sum[2]{#1->a;#2->b;(a*a)+(b*b)};@sq_sum(3,4)=,25
+!mem_op_func[1]{#1P;R};C;@mem_op_func(10)=,10
+!multi_step[1]{#1->x;x+1->x;x*2};@multi_step(5)=,12
+
+# Complex nested calls
+!add_three[3]{#1+#2+#3};@add_three(1,2,@add_three(3,4,5))=,15
+!nested_mem[1]{C;#1P;R};@nested_mem(10)+@nested_mem(20)=,30
+
+# Variable shadowing (global variables check)
+10->g;!set_g[1]{#1->g};@set_g(20);g=,20
+
+# Hex, Oct, Bin mixed
+0x10+010+0b10=,26
+
+# Complex arithmetic
+(10+20)*30/3-50=,250
+@max(@min(10,20),@max(5,30))=,30
+
+# Function with many arguments
+!sum_five[5]{#1+#2+#3+#4+#5};@sum_five(1,2,3,4,5)=,15
+
+# Using result of function in memory operation
+C;@max(10,20)P;R=,20
+
+# fibonacci
+!fibo[1]{$if(@ge(1,#1)){#1}{@fibo(#1-1)+@fibo(#1-2)}};@fibo(30)=,832040
+# factorial
+!fact[1]{$if(@ge(#1,1)){#1*@fact(#1-1)}{1}};@fact(10)=,3628800
