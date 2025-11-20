@@ -219,11 +219,15 @@ int parser(char** p, int nest_level, int is_misaligned) {
       // 現在の項を適用する
       apply_last_op(last_op, sign);
       // 計算結果をリセット
-      if (current_function == NULL) {
-        mprintf("xorl %%edx, %%edx\n");
-      }
+      mprintf("xorl %%edx, %%edx\n");
       reset_formula(&last_op, &sign);
-      // 関数定義についてもリセット
+      (*p)++;
+    } else if (**p == '}') {
+      // 関数定義終了
+      // 現在の項を適用する
+      apply_last_op(last_op, sign);
+      reset_formula(&last_op, &sign);
+      // 関数定義リセット
       is_haste = 1;
       current_function = NULL;
       (*p)++;
@@ -342,15 +346,15 @@ int main(int argc, char* argv[]) {
 void def_default_func() {
   is_haste = 0;
   static const char* codes[] = {
-    "!sgn[1]:@step(#1)-@step(#1S);",
-    "!abs[1]:@sgn(#1)*#1;",
-    "!gt[2]:@step(#1-#2);",
-    "!ge[2]:1-@step(#2-#1);",
-    "!eq[2]:1-@step(@abs(#1-#2));",
-    "!ne[2]:1-@eq(#1,#2);",
-    "!min[2]:#1+#2-@abs(#1-#2)/2;",
-    "!max[2]:#1+#2+@abs(#1-#2)/2;",
-    "!if[3]:@abs(@sgn(#1))*(#2-#3)+#3;",
+    "!sgn[1]{@step(#1)-@step(#1S)};",
+    "!abs[1]{@sgn(#1)*#1};",
+    "!gt[2]{@step(#1-#2)};",
+    "!ge[2]{1-@step(#2-#1)};",
+    "!eq[2]{1-@step(@abs(#1-#2))};",
+    "!ne[2]{1-@eq(#1,#2)};",
+    "!min[2]{#1+#2-@abs(#1-#2)/2};",
+    "!max[2]{#1+#2+@abs(#1-#2)/2};",
+    "!if[3]{@abs(@sgn(#1))*(#2-#3)+#3};",
   };
   for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
     char* p = (char*)codes[i];
@@ -580,12 +584,12 @@ void start_def_func(char** p) {
     arg_count = arg_count * 10 + (**p - '0');
     (*p)++;
   }
-  if (**p != ']' || peek(p) != ':') {
-    fprintf(stderr, "Expected \"]:\" after argument count: %s\n", func_name);
+  if (**p != ']' || peek(p) != '{') {
+    fprintf(stderr, "Expected \"]{\" after argument count: %s\n", func_name);
     return;
   }
   (*p)++;  // ']' をスキップ
-  (*p)++;  // ':' をスキップ
+  (*p)++;  // '{' をスキップ
   // 既存の同盟名関数があるか確認する
   int found = -1;
   for (int i = 0; i < function_count; i++) {

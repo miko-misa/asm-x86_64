@@ -57,19 +57,19 @@ C(2P3P)R=,5
 C1+3*2/3P5*(2+5P)R,9
 C1+3*2/3P5*(2+5P1+3)=,20
 # Function definitions and calls
-!double[1]:#1+#1;@double(21)=,42
-!adder[2]:#1+#2;10+@adder(3,4)=,17
-!square[1]:#1*#1;!quad[1]:@square(@square(#1));@quad(2)=,16
-!const_zero[0]:0;@const_zero()=,0
-!foo[1]:#1+#1;!foo[2]:#1+#2;@foo(5,7)=,12
-!store_value[1]:#1->saved_value;@store_value(34);saved_value=,34
-!sum_ten[10]:#1+#2+#3+#4+#5+#6+#7+#8+#9+#10;@sum_ten(1,2,3,4,5,6,7,8,9,10)=,55
-!mix[2]:@abs(#1-#2)+#1+#2;@mix(10,4)=,20
-!double[1]:#1+#1;(@double(3)+@double(5))=,16
-!clamp[3]:@max(#1,@min(#2,#3));@clamp(0,15,10)=,10
-5->big_var;!use_var[0]:big_var+big_var;@use_var()=,10
-!mem_add[2]:(#1+#2)P;C;@mem_add(3,4);R=,7
-!take_ten[10]:#10;@take_ten(1,2,3,4,5,6,7,8,9,10)=,10
+!double[1]{#1+#1};@double(21)=,42
+!adder[2]{#1+#2};10+@adder(3,4)=,17
+!square[1]{#1*#1};!quad[1]{@square(@square(#1))};@quad(2)=,16
+!const_zero[0]{0};@const_zero()=,0
+!foo[1]{#1+#1};!foo[2]{#1+#2};@foo(5,7)=,12
+!store_value[1]{#1->saved_value};@store_value(34);saved_value=,34
+!sum_ten[10]{#1+#2+#3+#4+#5+#6+#7+#8+#9+#10};@sum_ten(1,2,3,4,5,6,7,8,9,10)=,55
+!mix[2]{@abs(#1-#2)+#1+#2};@mix(10,4)=,20
+!double[1]{#1+#1};(@double(3)+@double(5))=,16
+!clamp[3]{@max(#1,@min(#2,#3))};@clamp(0,15,10)=,10
+5->big_var;!use_var[0]{big_var+big_var};@use_var()=,10
+!mem_add[2]{(#1+#2)P};C;@mem_add(3,4);R=,7
+!take_ten[10]{#10};@take_ten(1,2,3,4,5,6,7,8,9,10)=,10
 # Built-in and default helper validation
 @step(5)=,1
 @step(5S)=,0
@@ -90,4 +90,28 @@ C1+3*2/3P5*(2+5P1+3)=,20
 @if(5S,111,222)=,111
 # Identifier and assignment handling
 1+2->very_long_variable_name;very_long_variable_name+3=,6
-!capture[1]:#1->temp_result;@capture(99);temp_result=,99
+!capture[1]{#1->temp_result};@capture(99);temp_result=,99
+# Semicolon inside function definition
+!sq_sum[2]{#1->a;#2->b;(a*a)+(b*b)};@sq_sum(3,4)=,25
+!mem_op_func[1]{#1P;R};C;@mem_op_func(10)=,10
+!multi_step[1]{#1->x;x+1->x;x*2};@multi_step(5)=,12
+
+# Complex nested calls
+!add_three[3]{#1+#2+#3};@add_three(1,2,@add_three(3,4,5))=,15
+!nested_mem[1]{C;#1P;R};@nested_mem(10)+@nested_mem(20)=,30
+
+# Variable shadowing (global variables check)
+10->g;!set_g[1]{#1->g};@set_g(20);g=,20
+
+# Hex, Oct, Bin mixed
+0x10+010+0b10=,26
+
+# Complex arithmetic
+(10+20)*30/3-50=,250
+@max(@min(10,20),@max(5,30))=,30
+
+# Function with many arguments
+!sum_five[5]{#1+#2+#3+#4+#5};@sum_five(1,2,3,4,5)=,15
+
+# Using result of function in memory operation
+C;@max(10,20)P;R=,20
