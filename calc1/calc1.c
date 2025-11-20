@@ -4,14 +4,17 @@
 #if defined(TARGET_SYSTEM_LINUX)
 #define ASM_GLOBAL_MAIN "main"
 #define ASM_EXTERN_PRINTF "printf"
+#define ASM_EXTERN_EXIT "exit"
 #define ASM_CSTRING_SECTION ".section .rodata"
 #elif defined(TARGET_SYSTEM_MAC) || defined(__APPLE__)
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
+#define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
 #else
 #define ASM_GLOBAL_MAIN "_main"
 #define ASM_EXTERN_PRINTF "_printf"
+#define ASM_EXTERN_EXIT "_exit"
 #define ASM_CSTRING_SECTION ".section __TEXT,__cstring"
 #endif
 #define ASM_TEXT_SECTION ".text"
@@ -141,10 +144,16 @@ int main(int argc, char* argv[]) {
       reset_formula(&last_op, &sign);
       (*p)++;
     } else {
-      fprintf(stderr, "Invalid character: %c\n", **p);
-      return 1;
+      printf("leaq L_err(%%rip), %%rdi\n");
+      printf("movl $0, %%eax\n");
+      printf("callq " ASM_EXTERN_PRINTF "\n");
+      printf("movl $1, %%edi\n");
+      printf("callq " ASM_EXTERN_EXIT "\n");
+      return 0;
     }
   }
+  apply_last_op(last_op, sign);
+  finalize();
   return 0;
 }
 
@@ -156,9 +165,12 @@ void initialize() {
   static const char* const lines[] = {
       ".att_syntax prefix\n",
       ".extern " ASM_EXTERN_PRINTF "\n",
+      ".extern " ASM_EXTERN_EXIT "\n",
       ASM_CSTRING_SECTION "\n",
       "L_fmt:\n",
       ".asciz \"%d\\n\"\n",
+      "L_err:\n",
+      ".asciz \"E\\n\"\n",
       ASM_TEXT_SECTION "\n",
       ".globl " ASM_GLOBAL_MAIN "\n",
       ASM_GLOBAL_MAIN ":\n",
