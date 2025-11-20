@@ -188,7 +188,7 @@ void reset_formula(Op* last_op, Sign* sign) {
  * @param p 入力文字列へのポインタを示すポインタ。読み取った桁数だけ進む。
  */
 void input_number(char** p) {
-  while (**p >= '0' && **p <= '9') {
+  while (is_digit(**p)) {
     printf("movl $%d, %%edi\n", **p - '0');
     printf("imull $10, %%eax, %%eax\n");
     printf("addl %%edi, %%eax\n");

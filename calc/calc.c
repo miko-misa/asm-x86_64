@@ -498,7 +498,7 @@ void input_number(char** p) {
       return;
     }
   }
-  while ((**p >= '0' && **p <= '9') || (**p >= 'a' && **p <= 'f')) {
+  while ((is_digit(**p)) || (**p >= 'a' && **p <= 'f')) {
     mprintf("movl %%eax, %%edi\n");
     mprintf("movl $%d, %%esi\n", radex);
     mprintf("subq $8, %%rsp\n");
@@ -506,7 +506,7 @@ void input_number(char** p) {
     mprintf("callq mul32\n");
     mprintf("popq %%r11\n");
     mprintf("addq $8, %%rsp\n");
-    if (**p >= '0' && **p <= '9') {
+    if (is_digit(**p)) {
       mprintf("addl $%d, %%eax\n", **p - '0');
     } else if (**p >= 'a' && **p <= 'f') {
       mprintf("addl $%d, %%eax\n", **p - 'a' + 10);
@@ -717,8 +717,6 @@ void apply_last_op(Op last_op, Sign sign) {
       mprintf("movl %%eax, %%edx\n");
       break;
     case DIV:
-      mprintf("testl %%esi, %%esi\n");
-      mprintf("je L_overflow\n");
       mprintf("movl %%edx, %%edi\n");
       mprintf("subq $8, %%rsp\n");
       mprintf("pushq %%r11\n");
@@ -728,8 +726,6 @@ void apply_last_op(Op last_op, Sign sign) {
       mprintf("movl %%eax, %%edx\n");
       break;
     case MOD:
-      mprintf("testl %%esi, %%esi\n");
-      mprintf("je L_overflow\n");
       mprintf("movl %%edx, %%edi\n");
       mprintf("subq $8, %%rsp\n");
       mprintf("pushq %%r11\n");
@@ -823,7 +819,14 @@ void finalize() {
       "pushq %rbp\n",
       "movq %rsp, %rbp\n",
       "pushq %rdi\n",
-      "pushq %rsi\n",
+      "pushq %rsi\n", // 割る数
+      "testl %esi, %esi\n",
+      "je L_overflow\n",
+      "cmpl $0x80000000, %edi\n",
+      "jne .L_div32_safe\n",
+      "cmpl $-1, %esi\n",
+      "je L_overflow\n",
+      ".L_div32_safe:\n",
       "callq abs32\n",
       "movq %rax, %r8\n",
       "movq %rsi, %rdi\n",

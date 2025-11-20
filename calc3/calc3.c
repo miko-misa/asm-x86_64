@@ -196,7 +196,7 @@ void reset_formula(Op* last_op, Sign* sign) {
  * @param p 入力文字列へのポインタを示すポインタ。読み取った桁数だけ進む。
  */
 void input_number(char** p) {
-  while (**p >= '0' && **p <= '9') {
+  while (is_digit(**p)) {
     printf("movl %%eax, %%edi\n");
     printf("movl $10, %%esi\n");
     printf("callq mul32\n");
@@ -238,8 +238,6 @@ void apply_last_op(Op last_op, Sign sign) {
       printf("movl %%eax, %%edx\n");
       break;
     case DIV:
-      printf("testl %%esi, %%esi\n");
-      printf("je L_overflow\n");
       printf("movl %%edx, %%edi\n");
       printf("callq div32\n");
       printf("movl %%eax, %%edx\n");
@@ -279,6 +277,12 @@ void finalize() {
       "movq %rsp, %rbp\n",
       "pushq %rdi\n",
       "pushq %rsi\n",
+      "je L_overflow\n",
+      "cmpl $0x80000000, %edi\n",
+      "jne .L_div32_safe\n",
+      "cmpl $-1, %esi\n",
+      "je L_overflow\n",
+      ".L_div32_safe:\n",
       "callq abs32\n",
       "movq %rax, %r8\n",
       "movq %rsi, %rdi\n",
@@ -302,12 +306,12 @@ void finalize() {
       "popq %rdi\n",
       "testl $0x80000000, %edi\n",
       "jz .L_div32_quotient_neg\n",
-      "negl %edx\n",
+      "negq %rdx\n",
       ".L_div32_quotient_neg:\n",
       "xorl %edi, %esi\n",
       "testl $0x80000000, %esi\n",
       "jz .L_div32_end\n",
-      "negl %eax\n",
+      "negq %rax\n",
       ".L_div32_end:\n",
       "leave\n",
       "ret\n",
@@ -338,7 +342,7 @@ void finalize() {
       "xorl %edi, %esi\n",
       "testl $0x80000000, %esi\n",
       "jz .L_mul32_end\n",
-      "negl %eax\n",
+      "negq %rax\n",
       ".L_mul32_end:\n",
       "leave\n",
       "ret\n",
