@@ -206,7 +206,9 @@ void input_number(char** p) {
   while (is_digit(**p)) {
     printf("movl %%eax, %%edi\n");
     printf("movl $10, %%esi\n");
+    printf("pushq %%rdx\n");
     printf("callq mul32\n");
+    printf("popq %%rdx\n");
     printf("addl $%d, %%eax\n", **p - '0');
     printf("jo L_overflow\n");
     (*p)++;

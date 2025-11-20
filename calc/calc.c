@@ -555,11 +555,11 @@ void input_number(char** p) {
   while ((is_digit(**p)) || (**p >= 'a' && **p <= 'f')) {
     mprintf("movl %%eax, %%edi\n");
     mprintf("movl $%d, %%esi\n", radex);
-    mprintf("subq $8, %%rsp\n");
+    mprintf("pushq %%rdx\n");
     mprintf("pushq %%r11\n");
     mprintf("callq mul32\n");
     mprintf("popq %%r11\n");
-    mprintf("addq $8, %%rsp\n");
+    mprintf("popq %%rdx\n");
     if (is_digit(**p)) {
       mprintf("addl $%d, %%eax\n", **p - '0');
     } else if (**p >= 'a' && **p <= 'f') {
