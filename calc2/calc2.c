@@ -173,6 +173,7 @@ void initialize() {
       "pushq %rbp\n",
       "movq %rsp, %rbp\n",
       "xorl %eax, %eax\n",
+      "subq $8, %rsp\n",
       "pushq $0\n",
       "xorl %edx, %edx\n",
   };
@@ -249,7 +250,6 @@ void apply_last_op(Op last_op, Sign sign) {
  */
 void finalize() {
   static const char* const lines[] = {
-      "subq $8, %rsp\n",
       "movl %edx, %esi\n",
       "leaq L_fmt(%rip), %rdi\n",
       "movl $0, %eax\n",
@@ -260,7 +260,6 @@ void finalize() {
       "leave\n",
       "ret\n",
       "L_overflow:\n",
-      "subq $8, %rsp\n",
       "leaq L_err(%rip), %rdi\n",
       "movl $0, %eax\n",
       "callq " ASM_EXTERN_PRINTF "\n",
