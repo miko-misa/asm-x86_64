@@ -88,6 +88,14 @@ C1+3*2/3P5*(2+5P1+3)=,20
 @if(0,111,222)=,222
 @if(5,111,222)=,111
 @if(5S,111,222)=,111
+# $if expression
+$if(1){10}{20}=,10
+$if(0){10}{20}=,20
+1+$if(@eq(1,0)){1+2}{3*4}*3=,39
+$if(1){$if(0){1}{2}}{3}=,2
+$if(0){1}{$if(1){2}{3}}=,2
+!abs_if[1]{$if(@ge(#1,0)){#1}{0-#1}};@abs_if(-5)=,5
+!max_if[2]{$if(@gt(#1,#2)){#1}{#2}};@max_if(10,20)=,20
 # Identifier and assignment handling
 1+2->very_long_variable_name;very_long_variable_name+3=,6
 !capture[1]{#1->temp_result};@capture(99);temp_result=,99
@@ -115,3 +123,8 @@ C1+3*2/3P5*(2+5P1+3)=,20
 
 # Using result of function in memory operation
 C;@max(10,20)P;R=,20
+
+# fibonacci
+!fibo[1]{$if(@ge(1,#1)){#1}{@fibo(#1-1)+@fibo(#1-2)}};@fibo(30)=,832040
+# factorial
+!fact[1]{$if(@ge(#1,1)){#1*@fact(#1-1)}{1}};@fact(10)=,3628800
