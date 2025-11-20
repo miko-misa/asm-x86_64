@@ -146,10 +146,16 @@ int main(int argc, char* argv[]) {
       reset_formula(&last_op, &sign);
       (*p)++;
     } else {
-      fprintf(stderr, "Invalid character: %c\n", **p);
-      return 1;
+      printf("leaq L_err(%%rip), %%rdi\n");
+      printf("movl $0, %%eax\n");
+      printf("callq " ASM_EXTERN_PRINTF "\n");
+      printf("movl $1, %%edi\n");
+      printf("callq " ASM_EXTERN_EXIT "\n");
+      return 0;
     }
   }
+  apply_last_op(last_op, sign);
+  finalize();
   return 0;
 }
 
@@ -237,6 +243,11 @@ void apply_last_op(Op last_op, Sign sign) {
       printf("movl %%esi, %%ecx\n");
       printf("testl %%ecx, %%ecx\n");
       printf("je L_overflow\n");
+      printf("cmpl $-1, %%ecx\n");
+      printf("jne 1f\n");
+      printf("cmpl $0x80000000, %%edx\n");
+      printf("je L_overflow\n");
+      printf("1:\n");
       printf("movl %%edx, %%eax\n");
       printf("cltd\n");
       printf("idivl %%ecx\n");
