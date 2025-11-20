@@ -70,6 +70,10 @@ FunctionInfo functions[MAX_VAR_FUNC];
 int function_count = 0;
 FunctionInfo* current_function = NULL;
 
+int if_counter = 0;
+
+void error_exit(char** p);
+
 void initialize();
 void input_number(char** p);
 int input_variable(char** p);
@@ -176,7 +180,6 @@ int parser(char** p, int nest_level, int is_misaligned) {
       (*p)++;
       start_def_func(p);
       if (!peek(p)) {
-        finalize();
         return 0;
       }
     } else if (**p == '@') {
@@ -210,9 +213,6 @@ int parser(char** p, int nest_level, int is_misaligned) {
       apply_last_op(last_op, sign);
       // 変数定義の場合
       // 計算結果を出力して終了する
-      if (nest_level == 0) {
-        finalize();
-      }
       return 0;
     } else if (**p == ';') {
       // 式の区切り
@@ -223,6 +223,13 @@ int parser(char** p, int nest_level, int is_misaligned) {
       reset_formula(&last_op, &sign);
       (*p)++;
     } else if (**p == '}') {
+      if (nest_level > 0) {
+        // 入れ子終了 (for _if blocks)
+        (*p)++;
+        apply_last_op(last_op, sign);
+        finish_nesting(is_misaligned);
+        return 0;
+      }
       // 関数定義終了
       // 現在の項を適用する
       apply_last_op(last_op, sign);
@@ -231,6 +238,47 @@ int parser(char** p, int nest_level, int is_misaligned) {
       is_haste = 1;
       current_function = NULL;
       (*p)++;
+    } else if (**p == '$' && strncmp(*p, "$if", 3) == 0) {
+      (*p) += 3;
+      while (**p == ' ') (*p)++;
+      if (**p != '(') {
+        error_exit(p);
+        return 0;
+      }
+      (*p)++;  // consume (
+
+      // Condition
+      if (nesting(p, nest_level, 0) != 0) return 0;
+
+      int id = if_counter++;
+
+      mprintf("cmpl $0, %%eax\n");
+      mprintf("je .L_else_%d\n", id);
+
+      while (**p == ' ') (*p)++;
+      if (**p != '{') {
+        error_exit(p);
+        return 0;
+      }
+      (*p)++;  // consume {
+
+      // Then block
+      if (nesting(p, nest_level, 0) != 0) return 0;
+
+      mprintf("jmp .L_end_%d\n", id);
+      mprintf(".L_else_%d:\n", id);
+
+      while (**p == ' ') (*p)++;
+      if (**p != '{') {
+        error_exit(p);
+        return 0;
+      }
+      (*p)++;  // consume {
+
+      // Else block
+      if (nesting(p, nest_level, 0) != 0) return 0;
+
+      mprintf(".L_end_%d:\n", id);
     } else if (is_memory_clear(**p)) {
       // メモリをクリアする
       mprintf("xorl %%edx, %%edx\n");
@@ -243,7 +291,6 @@ int parser(char** p, int nest_level, int is_misaligned) {
       // メモリを呼び出す
       mprintf("movl %%r11d, %%edx\n");
       if (!peek(p)) {
-        finalize();
         return 0;
       }
       reset_formula(&last_op, &sign);
@@ -297,7 +344,8 @@ int parser(char** p, int nest_level, int is_misaligned) {
       // 変数名を構成する（未実装）
       int result = input_variable(p);
       if (result != 0) {
-        return 1;
+        error_exit(p);
+        return 0;
       }
     } else if (**p == '#' && current_function != NULL) {
       // 関数内引数参照
@@ -311,10 +359,11 @@ int parser(char** p, int nest_level, int is_misaligned) {
       int offset = 16 + arg_index * 8;
       mprintf("movl %d(%%rbp), %%eax\n", offset);
     } else {
-      fprintf(stderr, "Invalid character: %c\n", **p);
-      return 1;
+      error_exit(p);
+      return 0;
     }
   }
+  apply_last_op(last_op, sign);
   return 0;
 }
 
@@ -334,7 +383,9 @@ int main(int argc, char* argv[]) {
   char** p = &input;
   initialize();
   def_default_func();
-  return parser(p, 0, 0);
+  int ret = parser(p, 0, 0);
+  finalize();
+  return ret;
 }
 
 /**
@@ -560,7 +611,6 @@ int input_variable(char** p) {
     }
   }
   // 変数が見つからなかった場合、エラーを出力する
-  fprintf(stderr, "Undefined variable: %s\n", var_name);
   return 1;
 }
 
@@ -574,7 +624,7 @@ void start_def_func(char** p) {
   char func_name[MAX_IDENTIFIER_LEN];
   read_identifier(p, func_name);
   if (**p != '[') {
-    fprintf(stderr, "Expected '[' after function name: %s\n", func_name);
+    error_exit(p);
     return;
   }
   (*p)++;  // '[' をスキップ
@@ -585,7 +635,7 @@ void start_def_func(char** p) {
     (*p)++;
   }
   if (**p != ']' || peek(p) != '{') {
-    fprintf(stderr, "Expected \"]{\" after argument count: %s\n", func_name);
+    error_exit(p);
     return;
   }
   (*p)++;  // ']' をスキップ
@@ -626,11 +676,11 @@ void start_call_func(char** p, int nest_level) {
     }
   }
   if (found < 0) {
-    fprintf(stderr, "Undefined function: %s\n", func_name);
+    error_exit(p);
     return;
   }
   if (**p != '(') {
-    fprintf(stderr, "Expected '(' after function name: %s\n", func_name);
+    error_exit(p);
     return;
   }
   (*p)++;  // '(' をスキップ
@@ -655,7 +705,7 @@ void start_call_func(char** p, int nest_level) {
     } else if (i == f->arg_count - 1) {
       // 最後の引数の後の ')' はスキップされてる
     } else {
-      fprintf(stderr, "Expected ',' or ')' after argument %d of function %s\n", i + 1, func_name);
+      error_exit(p);
       return;
     }
     align += 8;
@@ -664,7 +714,7 @@ void start_call_func(char** p, int nest_level) {
   }
   if (f->arg_count == 0) {
     if (**p != ')') {
-      fprintf(stderr, "Expected ')' to close call to function %s\n", func_name);
+      error_exit(p);
       return;
     }
     (*p)++;
@@ -713,10 +763,6 @@ void apply_last_op(Op last_op, Sign sign) {
       mprintf("callq mul32\n");
       mprintf("popq %%r11\n");
       mprintf("addq $8, %%rsp\n");
-      mprintf("movq %%rax, %%rcx\n");
-      mprintf("movslq %%eax, %%rdx\n");
-      mprintf("cmpq %%rdx, %%rcx\n");
-      mprintf("jne L_overflow\n");
       mprintf("movl %%eax, %%edx\n");
       break;
     case DIV:
@@ -891,6 +937,9 @@ void finalize() {
       "jz .L_mul32_end\n",
       "negq %rax\n",
       ".L_mul32_end:\n",
+      "movslq %eax, %rdx\n",
+      "cmpq %rdx, %rax\n",
+      "jne L_overflow\n",
       "leave\n",
       "ret\n",
       ".globl abs32\n",
@@ -967,3 +1016,16 @@ bool is_memory_sub(char c) { return c == 'M'; }
  * @return 変数名に使用可能な文字であれば true。
  */
 bool is_identifier_char(char c) { return (c >= 'a' && c <= 'z') || (c == '_'); }
+
+/**
+ * @brief エラー処理を行い、アセンブリを生成して 'E' を表示し、終了する。
+ * @param p 入力ポインタへのポインタ。
+ */
+void error_exit(char** p) {
+  mprintf("leaq L_err(%%rip), %%rdi\n");
+  mprintf("movl $0, %%eax\n");
+  mprintf("callq " ASM_EXTERN_PRINTF "\n");
+  mprintf("movl $1, %%edi\n");
+  mprintf("callq " ASM_EXTERN_EXIT "\n");
+  **p = '\0';
+}
