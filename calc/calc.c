@@ -189,16 +189,15 @@ int parser(char** p, int nest_level, int is_misaligned) {
     } else if (is_operator(**p)) {
       // 演算子を適用する
       // 最後の演算子以外を読み飛ばす
-      ignore_consecutive_operators(p);
+      while (peek(p) && (is_operator(peek(p)) || is_sign_inversion(peek(p)) || peek(p) == ' ')) {
+        (*p)++;
+      }
       // 現在の項を適用する
       apply_last_op(last_op, sign);
       reset_formula(&last_op, &sign);
-      // 次の演算子を設定する（enum
-      // にリテラルを割り当てたので、文字コードを直接代入）
+      // 次の演算子を設定する（enum に文字リテラルを割り当てたので直接代入）
       last_op = (Op) * *p;
       (*p)++;
-      // 直後の符号反転トークンをすべて読み飛ばす
-      ignore_all_sign_inversions(p);
     } else if (**p == ' ') {
       // 空白を読み飛ばす（仕様上はありえない）
       (*p)++;
@@ -933,24 +932,6 @@ bool is_sign_inversion(char c) { return c == 'S'; }
  * @return 次の文字。終端に到達している場合の動作は呼び出し側が保証する。
  */
 char peek(char** p) { return *(*p + 1); }
-/**
- * @brief 演算子が連続した場合に余分な演算子を読み飛ばす。
- * @param p 入力文字列ポインタへのポインタ。読み飛ばした分だけ進む。
- */
-void ignore_consecutive_operators(char** p) {
-  while (is_operator(peek(p))) {
-    (*p)++;
-  }
-}
-/**
- * @brief 符号反転トークンを連続して読み飛ばす。
- * @param p 入力文字列ポインタへのポインタ。読み飛ばした分だけ進む。
- */
-void ignore_all_sign_inversions(char** p) {
-  while (is_sign_inversion(**p)) {
-    (*p)++;
-  }
-}
 
 /**
  * @brief メモリクリア命令かどうかを判定する。
