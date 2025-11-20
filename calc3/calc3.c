@@ -146,10 +146,16 @@ int main(int argc, char* argv[]) {
       reset_formula(&last_op, &sign);
       (*p)++;
     } else {
-      fprintf(stderr, "Invalid character: %c\n", **p);
-      return 1;
+      printf("leaq L_err(%%rip), %%rdi\n");
+      printf("movl $0, %%eax\n");
+      printf("callq " ASM_EXTERN_PRINTF "\n");
+      printf("movl $1, %%edi\n");
+      printf("callq " ASM_EXTERN_EXIT "\n");
+      return 0;
     }
   }
+  apply_last_op(last_op, sign);
+  finalize();
   return 0;
 }
 
@@ -232,10 +238,6 @@ void apply_last_op(Op last_op, Sign sign) {
     case MUL:
       printf("movl %%edx, %%edi\n");
       printf("callq mul32\n");
-      printf("movq %%rax, %%rcx\n");
-      printf("movslq %%eax, %%rdx\n");
-      printf("cmpq %%rdx, %%rcx\n");
-      printf("jne L_overflow\n");
       printf("movl %%eax, %%edx\n");
       break;
     case DIV:
@@ -276,6 +278,7 @@ void finalize() {
       "movq %rsp, %rbp\n",
       "pushq %rdi\n",
       "pushq %rsi\n",
+      "testl %esi, %esi\n",
       "je L_overflow\n",
       "cmpl $0x80000000, %edi\n",
       "jne .L_div32_safe\n",
@@ -343,6 +346,9 @@ void finalize() {
       "jz .L_mul32_end\n",
       "negq %rax\n",
       ".L_mul32_end:\n",
+      "movslq %eax, %rdx\n",
+      "cmpq %rdx, %rax\n",
+      "jne L_overflow\n",
       "leave\n",
       "ret\n",
       ".globl abs32\n",
